@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/raw/
+*.pt
+.env
+.DS_Store
+*.log
+
+# real clips stay local; docs/data-sources.md says how to rebuild them
+data/*
+!data/synthetic/
+
+# test artifacts and third-party reference screenshots
+viewer/screenshots/
+docs/reference/

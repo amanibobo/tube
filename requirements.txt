@@ -1,0 +1,15 @@
+numpy
+pandas
+pyarrow
+shapely
+opencv-python
+fastapi
+uvicorn
+anthropic
+ultralytics
+lap
+pytest
+httpx
+ruff
+python-multipart
+modal

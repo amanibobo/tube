@@ -1,0 +1,121 @@
+{
+ "fps": 30,
+ "crosswalk_zone": {
+  "id": "crosswalk",
+  "name": "crosswalk",
+  "polygon": [
+   [
+    540,
+    250
+   ],
+   [
+    740,
+    250
+   ],
+   [
+    740,
+    580
+   ],
+   [
+    540,
+    580
+   ]
+  ]
+ },
+ "near_misses": [
+  {
+   "person": 13,
+   "car": 14,
+   "f": 1380,
+   "min_dist": 8,
+   "car_speed": 420,
+   "score": 52.5
+  },
+  {
+   "person": 9,
+   "car": 10,
+   "f": 1080,
+   "min_dist": 20,
+   "car_speed": 340,
+   "score": 17.0
+  },
+  {
+   "person": 3,
+   "car": 4,
+   "f": 360,
+   "min_dist": 35,
+   "car_speed": 260,
+   "score": 7.428571428571429
+  },
+  {
+   "person": 16,
+   "car": 15,
+   "f": 1575,
+   "min_dist": 60,
+   "car_speed": 150,
+   "score": 2.5
+  }
+ ],
+ "close_pairs": [
+  [
+   13,
+   14
+  ],
+  [
+   9,
+   10
+  ],
+  [
+   3,
+   4
+  ],
+  [
+   16,
+   15
+  ]
+ ],
+ "top3_near_misses": [
+  [
+   13,
+   14
+  ],
+  [
+   9,
+   10
+  ],
+  [
+   3,
+   4
+  ]
+ ],
+ "stopped_in_crosswalk": {
+  "car": 6,
+  "f_start": 750,
+  "f_end": 900
+ },
+ "stopped_outside_crosswalk": {
+  "car": 19
+ },
+ "close_to_stopped_car": [
+  7,
+  6
+ ],
+ "fastest_car": {
+  "car": 17,
+  "speed": 700
+ },
+ "crossings_per_minute": {
+  "0": 6,
+  "1": 2
+ },
+ "crossing_people": [
+  1,
+  3,
+  5,
+  9,
+  13,
+  16,
+  20,
+  22
+ ]
+}

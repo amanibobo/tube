@@ -1,0 +1,18 @@
+{
+ "id": "synthetic",
+ "title": "Synthetic intersection",
+ "status": "ready",
+ "stage": null,
+ "progress": 1.0,
+ "error": null,
+ "created": 1791673902.3266635,
+ "duration_s": 80.0,
+ "credit": "Synthetic scene",
+ "source": "builtin",
+ "done": [
+  "normalizing",
+  "segmenting",
+  "building",
+  "indexing"
+ ]
+}

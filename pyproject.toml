@@ -1,0 +1,16 @@
+[project]
+name = "tubewatch"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["slow: runs YOLO on a real clip (about 20 s)"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["viewer", "data", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
