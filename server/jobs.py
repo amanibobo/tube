@@ -39,19 +39,25 @@ class EventHub:
 
 
 class Cancelled(Exception):
-    pass
+    """The video was deleted mid-job: drop its directory."""
+
+
+class Stopped(Exception):
+    """The server is shutting down: leave the job where it is, to resume on the next start."""
 
 
 class JobReporter:
     """Turns stage progress into meta.json updates and status/tubes events."""
 
-    def __init__(self, video: Video, hub: EventHub):
-        self.video, self.hub = video, hub
+    def __init__(self, video: Video, hub: EventHub, stopping: threading.Event):
+        self.video, self.hub, self.stopping = video, hub, stopping
         self.start, self.width, self.last, self.stage_name, self.message = 0.0, 0.0, -1.0, None, ""
 
     def _check(self) -> None:
         if self.video.cancelled:
             raise Cancelled
+        if self.stopping.is_set():
+            raise Stopped
 
     def _emit(self, progress: float) -> None:
         process.update_meta(self.video.root, progress=round(progress, 3), message=self.message)
@@ -78,9 +84,17 @@ class JobReporter:
 class Jobs:
     def __init__(self, library: Library, hub: EventHub):
         self.library, self.hub = library, hub
-        self.queue: queue.Queue[Video] = queue.Queue()
+        self.queue: queue.Queue[Video | None] = queue.Queue()
         self.active: set[str] = set()
-        threading.Thread(target=self._worker, daemon=True, name="tubewatch-jobs").start()
+        self.stopping = threading.Event()
+        self.worker = threading.Thread(target=self._worker, daemon=True, name="tubewatch-jobs")
+        self.worker.start()
+
+    def shutdown(self, timeout: float = 30) -> None:
+        """Stop at the running job's next progress check; queued jobs stay queued for the next start."""
+        self.stopping.set()
+        self.queue.put(None)
+        self.worker.join(timeout)
 
     def submit(self, video: Video) -> None:
         self.active.add(video.id)
@@ -95,6 +109,8 @@ class Jobs:
     def _worker(self) -> None:
         while True:
             video = self.queue.get()
+            if video is None or self.stopping.is_set():
+                return
             try:
                 self._run(video)
             finally:
@@ -104,11 +120,13 @@ class Jobs:
         try:
             if video.cancelled:
                 raise Cancelled
-            process.run(video.root, JobReporter(video, self.hub))
+            process.run(video.root, JobReporter(video, self.hub, self.stopping))
             video.invalidate()
             self.hub.publish(video.id, {"type": "done"})
         except Cancelled:
             shutil.rmtree(video.root, ignore_errors=True)
+        except Stopped:
+            log.info("job %s stopped for shutdown; it resumes on the next start", video.id)
         except process.JobFailed as e:
             self._fail(video, str(e))
         except Exception as e:  # noqa: BLE001  any crash becomes a plain sentence for the viewer

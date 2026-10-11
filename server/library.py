@@ -85,6 +85,14 @@ class Library:
         self.videos[video_id] = Video(root)
         return self.videos[video_id]
 
+    def create_clip(self, video_id: str, title: str, url: str, start: float, end: float) -> Video:
+        root = self.data_root / video_id
+        root.mkdir()
+        process.write_meta(root, process.new_meta(video_id, title or video_id, "clip", source_url=url,
+                                                  clip_start=start, clip_end=end, duration_s=round(end - start, 2)))
+        self.videos[video_id] = Video(root)
+        return self.videos[video_id]
+
     def remove(self, video_id: str) -> None:
         video = self.videos.pop(video_id)
         shutil.rmtree(video.root, ignore_errors=True)

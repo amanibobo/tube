@@ -80,6 +80,8 @@ def test_upload_runs_every_stage_streams_events_and_resumes(client, root, monkey
     assert progress == sorted(progress)
     tubes_events = [i for i, e in enumerate(stream) if e["type"] == "tubes"]
     assert tubes_events and tubes_events[-1] < len(stream) - 1
+    # the empty partial cube lands as soon as the video is prepared, before any tracks
+    assert stream[tubes_events[0]]["tracks"] == 0
 
     meta = client.get(f"/api/videos/{vid}").json()
     assert meta["status"] == "ready" and meta["done"] == STAGES and meta["backend"] == "yolo"

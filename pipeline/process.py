@@ -7,6 +7,7 @@ interrupted at any point resumes at the first unfinished stage and redoes only t
 import gzip
 import json
 import os
+import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -54,17 +55,28 @@ def new_meta(video_id: str, title: str, source: str, **extra) -> dict:
 
 
 def normalizing(root: Path, meta: dict, report: Reporter) -> None:
-    src = Path(meta["source_file"])
-    if not src.exists():
-        raise JobFailed("The uploaded file is missing. Please upload the video again.")
-    media.normalize_video(src, root / "video.mp4", meta.get("max_seconds", media.MAX_SECONDS))
+    if meta["source"] == "clip":
+        try:
+            media.normalize_video(meta["source_url"], root / "video.mp4", meta["clip_end"] - meta["clip_start"],
+                                  start=meta["clip_start"], remote=True)
+        except subprocess.CalledProcessError as e:
+            raise JobFailed("Couldn't read the video from the archive. Try sending the moment again.") from e
+    else:
+        src = Path(meta["source_file"])
+        if not src.exists():
+            raise JobFailed("The uploaded file is missing. Please upload the video again.")
+        media.normalize_video(src, root / "video.mp4", meta.get("max_seconds", media.MAX_SECONDS))
     report.progress(0.5)
     n = media.write_thumbnails(root / "video.mp4", root / "frames")
     info = media.probe(root / "video.mp4")
     meta.update(duration_s=round(n / info["fps"], 2), fps=info["fps"], width=info["width"],
                 height=info["height"], frames=n)
-    if not meta.get("keep_source"):
-        src.unlink(missing_ok=True)
+    if meta.get("source_file") and not meta.get("keep_source"):
+        Path(meta["source_file"]).unlink(missing_ok=True)
+    # an empty partial cube, so the viewer can show the video, volume and frame plane while segmenting runs
+    write_json(root / "tubes.json", {"video": {**video_block(root, meta), "partial": True, "frames_done": 0},
+                                     "tracks": []})
+    report.tubes(0, 0)
 
 
 def video_block(root: Path, meta: dict) -> dict:

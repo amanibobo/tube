@@ -4,14 +4,23 @@ import { FALLBACK_IDENTITY, fetchLibrary, frameStillUrl, libraryLoaded, libraryR
 import { useAccount } from './auth'
 import { newDeviceId, storedDeviceId } from './device'
 import { layoutLibrary } from './layout'
+import { clipTitle, clipWindow, CUBE_AVAILABLE, sendToCube } from './cube'
 import { Loader, useElapsed } from './Loader'
 import { Masthead } from './Masthead'
 import { Scene, type AnchorSink, type FilmFocus, type FrameHit, type ScreenBox } from './Scene'
 import { useUploads } from './uploads'
 import { useVoice, voiceActive, type Ending } from './voice'
 
-/** Who chose the frame the hover card shows: the pointer, or the arrow keys stepping through results. */
-type Pick = { by: 'pointer'; hit: FrameHit | null } | { by: 'keys'; index: number }
+/**
+ * Who chose the frame the card shows: the pointer, the arrow keys stepping through results, or a click that pins it.
+ * A pin outlasts hovering elsewhere and moves with the arrow keys; Esc, its ×, or a click on empty canvas lets go.
+ */
+type Pick =
+  | { by: 'pointer'; hit: FrameHit | null }
+  | { by: 'keys'; index: number }
+  | { by: 'pin'; hit: FrameHit; expanded: boolean }
+
+const pinOf = (m: Moment): Pick => ({ by: 'pin', hit: { filmId: m.filmId, frame: m.frame, rank: m.rank }, expanded: false })
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError'
@@ -108,7 +117,7 @@ export function Archive() {
   const moments = search.status === 'ready' ? search.moments : NO_MOMENTS
   const hover = useMemo(() => hoverOf(pick, moments), [pick, moments])
   const focusIndex = hover.kind === 'frame' && hover.moment ? moments.indexOf(hover.moment) : -1
-  const stepped = pick.by === 'keys' ? moments[pick.index] ?? null : null
+  const stepped = pick.by === 'keys' ? moments[pick.index] ?? null : pick.by === 'pin' && hover.kind === 'frame' ? hover.moment : null
 
   const submit = useCallback((raw: string) => {
     const query = raw.trim()
@@ -128,20 +137,29 @@ export function Archive() {
   }, [])
 
   const onHover = useCallback((hit: FrameHit | null) => {
-    setPick((p) => (p.by === 'keys' || sameHit(p.hit, hit) ? p : { by: 'pointer', hit }))
+    setPick((p) => (p.by !== 'pointer' || sameHit(p.hit, hit) ? p : { by: 'pointer', hit }))
   }, [])
+  const onPin = useCallback((hit: FrameHit) => {
+    setPick((p) => (p.by === 'pin' && sameHit(p.hit, hit) ? p : { by: 'pin', hit, expanded: false }))
+  }, [])
+  const unpin = useCallback(() => setPick((p) => (p.by === 'pin' ? NO_PICK : p)), [])
+  const setExpanded = useCallback((expanded: boolean) => setPick((p) => (p.by === 'pin' ? { ...p, expanded } : p)), [])
 
+  const pinned = pick.by === 'pin'
   const step = useCallback((by: number) => {
     const n = moments.length
     if (!n) return
-    setPick({ by: 'keys', index: focusIndex < 0 ? (by > 0 ? 0 : n - 1) : (focusIndex + by + n) % n })
-  }, [moments.length, focusIndex])
+    const index = focusIndex < 0 ? (by > 0 ? 0 : n - 1) : (focusIndex + by + n) % n
+    setPick(pinned ? pinOf(moments[index]!) : { by: 'keys', index })
+  }, [moments, focusIndex, pinned])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const inInput = e.target instanceof HTMLInputElement
       if (e.key === 'ArrowDown' || (e.key === 'ArrowRight' && !inInput)) { e.preventDefault(); step(1) }
       if (e.key === 'ArrowUp' || (e.key === 'ArrowLeft' && !inInput)) { e.preventDefault(); step(-1) }
+      // Voice search claims Esc first (and prevents it) while it listens.
+      if (e.key === 'Escape' && !e.defaultPrevented) setPick((p) => (p.by !== 'pin' ? p : p.expanded ? { ...p, expanded: false } : NO_PICK))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -164,12 +182,19 @@ export function Archive() {
   return (
     <>
       <div className={['stage', ready && 'shown', onResult && 'on-result'].filter(Boolean).join(' ')}>
-        <Scene layout={layout} search={search} hover={hover} stepped={stepped} focus={focus} onHover={onHover} onPageSettled={onPageSettled} anchorSink={anchorSink} />
+        <Scene layout={layout} search={search} hover={hover} stepped={stepped} focus={focus} onHover={onHover} onPick={onPin} onMiss={unpin} onPageSettled={onPageSettled} anchorSink={anchorSink} />
       </div>
       <Masthead identity={identity} films={films.length ? films : null} />
       {ready && uploadsMode && <AccountCorner mode={uploadsMode} noun={identity.noun} uploads={uploads} films={films} onLibraryChanged={onLibraryChanged} onDeviceNeeded={ensureDevice} onShowFilm={showFilm} />}
       <Loader library={library} onRetry={retryLibrary} />
-      {hover.kind === 'frame' && <HoverCard hover={hover} film={films.find((f) => f.id === hover.filmId)} sink={anchorSink} />}
+      {hover.kind === 'frame' && (
+        <HoverCard
+          hover={hover}
+          film={films.find((f) => f.id === hover.filmId)}
+          sink={anchorSink}
+          pin={pick.by === 'pin' ? { expanded: pick.expanded, onExpand: setExpanded, onUnpin: unpin } : null}
+        />
+      )}
       <SearchPill status={pillStatus(search, focusIndex)} disabled={!ready} voice={voice} onSubmit={submit} />
     </>
   )
@@ -193,7 +218,9 @@ function place(box: ScreenBox, w: number, h: number): Placement {
   const vw = window.innerWidth, vh = window.innerHeight
   const cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2
   const clampX = (x: number) => Math.min(Math.max(x, EDGE_PX), vw - w - EDGE_PX)
-  const clampY = (y: number) => Math.min(Math.max(y, EDGE_PX), vh - h - EDGE_PX)
+  // Cards stay above the search pill.
+  const floor = (document.querySelector('.pill')?.getBoundingClientRect().top ?? vh) - EDGE_PX
+  const clampY = (y: number) => Math.min(Math.max(y, EDGE_PX), floor - h)
   if (box.top - CONNECTOR_PX - h >= EDGE_PX) {
     return { card: { left: clampX(cx - w / 2), top: box.top - CONNECTOR_PX - h }, line: { x: cx, y: box.top - CONNECTOR_PX, length: CONNECTOR_PX, vertical: true }, ring: { x: cx, y: box.top } }
   }
@@ -206,7 +233,10 @@ function place(box: ScreenBox, w: number, h: number): Placement {
   return { card: { left: clampX(cx - w / 2), top: box.bottom + CONNECTOR_PX }, line: { x: cx, y: box.bottom, length: CONNECTOR_PX, vertical: true }, ring: { x: cx, y: box.bottom } }
 }
 
-function HoverCard({ hover, film, sink }: { hover: Extract<Hover, { kind: 'frame' }>; film: Film | undefined; sink: RefObject<AnchorSink | null> }) {
+/** A pinned card's controls: the full caption, and letting go. */
+interface PinControls { expanded: boolean; onExpand: (expanded: boolean) => void; onUnpin: () => void }
+
+function HoverCard({ hover, film, sink, pin }: { hover: Extract<Hover, { kind: 'frame' }>; film: Film | undefined; sink: RefObject<AnchorSink | null>; pin: PinControls | null }) {
   const root = useRef<HTMLDivElement>(null)
   const card = useRef<HTMLDivElement>(null)
   const line = useRef<HTMLDivElement>(null)
@@ -262,7 +292,7 @@ function HoverCard({ hover, film, sink }: { hover: Extract<Hover, { kind: 'frame
 
   if (!film) return null
   return (
-    <div className="hover" ref={root} style={{ visibility: 'hidden' }}>
+    <div className={pin ? 'hover pinned' : 'hover'} ref={root} style={{ visibility: 'hidden' }}>
       <div className="connector" ref={line} />
       <div className="connector-ring" ref={ring} />
       <div className="card" ref={card}>
@@ -275,9 +305,65 @@ function HoverCard({ hover, film, sink }: { hover: Extract<Hover, { kind: 'frame
             </div>
           )}
         </div>
-        <div className="card-label">{film.title} · {clock(time)}</div>
-        {hover.moment?.caption && <p className="card-caption">{hover.moment.caption}</p>}
+        <div className="card-head">
+          <div className="card-label">{film.title} · {clock(time)}</div>
+          {pin && (
+            <span className="card-pin">
+              Pinned
+              <button type="button" className="card-close" aria-label="Unpin" title="Unpin (Esc)" onClick={pin.onUnpin}>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              </button>
+            </span>
+          )}
+        </div>
+        {hover.moment?.caption && <p className={pin?.expanded ? 'card-caption full' : 'card-caption'}>{hover.moment.caption}</p>}
+        {pin && (
+          <CardActions
+            key={`${film.id}@${hover.frame}`}
+            film={film}
+            t={hover.moment ? hover.moment.t : hover.frame / film.sampleFps}
+            caption={!!hover.moment?.caption}
+            pin={pin}
+          />
+        )}
       </div>
+    </div>
+  )
+}
+
+type Sending = { kind: 'idle' } | { kind: 'sending' } | { kind: 'error'; message: string }
+
+function CardActions({ film, t, caption, pin }: { film: Film; t: number; caption: boolean; pin: PinControls }) {
+  const [sending, setSending] = useState<Sending>({ kind: 'idle' })
+  const clip = clipWindow(t, film.duration)
+  const open = () => {
+    setSending({ kind: 'sending' })
+    void sendToCube(film, clip).then((r) => {
+      if (r.ok) location.assign(`/app?v=${encodeURIComponent(r.id)}`)
+      else setSending({ kind: 'error', message: r.message })
+    })
+  }
+  return (
+    <div className="card-actions">
+      <div className="card-buttons">
+        {caption && (
+          <button type="button" className="text-button" onClick={() => pin.onExpand(!pin.expanded)}>
+            {pin.expanded ? 'Less' : 'Expand'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="text-button card-cube"
+          disabled={!CUBE_AVAILABLE || sending.kind === 'sending'}
+          title={clipTitle(film, clip)}
+          onClick={open}
+        >
+          {sending.kind === 'sending' ? 'Opening in the cube…' : 'Open in the cube'}
+        </button>
+        <span className="card-note">±20 s</span>
+      </div>
+      {!CUBE_AVAILABLE && <p className="card-note">Open in the cube needs Tube running locally</p>}
+      {sending.kind === 'error' && <p className="card-error" role="alert">{sending.message}</p>}
     </div>
   )
 }

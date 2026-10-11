@@ -1,5 +1,6 @@
 """Local fallback segmentation: YOLO11-seg + ByteTrack on MPS (else CPU)."""
 
+import threading
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +12,7 @@ from pipeline.contours import mask_contour
 COCO = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 WEIGHTS = str(Path(__file__).resolve().parents[1] / "yolo11m-seg.pt")
 PROGRESS_EVERY = 150
+_ONE_AT_A_TIME = threading.Lock()  # concurrent MPS inference from two threads segfaults
 
 
 def pick_device(model) -> str:
@@ -23,6 +25,11 @@ def pick_device(model) -> str:
 
 def yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None]) -> list[dict]:
     """Raw tracks {source_class, frames}; calls on_progress(tracks_so_far, frames_done) every PROGRESS_EVERY."""
+    with _ONE_AT_A_TIME:
+        return _yolo_tracks(video, info, on_progress)
+
+
+def _yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None]) -> list[dict]:
     from ultralytics import YOLO
 
     model = YOLO(WEIGHTS)

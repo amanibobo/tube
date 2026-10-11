@@ -151,6 +151,21 @@ canvas { display: block; touch-action: none; }
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 
+/* Pinned: the card takes clicks and stays put; a hairline of lilac and a quiet note say so. */
+.hover.pinned .card { pointer-events: auto; border-color: rgba(201, 160, 240, 0.45); }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.card-head .card-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-pin { flex: none; display: flex; align-items: center; gap: 6px; padding-right: 2px; font-size: 12px; color: var(--faint); }
+.card-close { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; background: none; border: none; border-radius: 6px; cursor: pointer; }
+.card-close svg { width: 11px; height: 11px; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; }
+.card-close:hover svg { stroke: var(--text); }
+.card-caption.full { display: block; -webkit-line-clamp: unset; max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: contain; color: #bdbab6; }
+.card-actions { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 10px; }
+.card-buttons { display: flex; align-items: baseline; gap: 16px; }
+.card-cube { color: #d6d4d1; }
+.card-note { margin: 0; font-size: 12px; color: var(--faint); }
+.card-error { margin: 0; font-size: 12px; line-height: 1.45; color: var(--error); overflow-wrap: anywhere; }
+
 /* Account corner: as quiet as the masthead opposite it. */
 .account { position: fixed; right: 28px; top: 20px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .account-bar { position: relative; display: flex; align-items: center; gap: 10px; }

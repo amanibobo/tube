@@ -3,6 +3,8 @@
 TUBEWATCH_DATA_ROOT picks the library directory (default: the repo's data/).
 """
 
+import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -10,6 +12,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -26,6 +29,30 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1] / "data"
 
 class QueryIn(BaseModel):
     text: str = Field(min_length=1)
+
+
+class ClipIn(BaseModel):
+    url: str
+    start_s: float
+    end_s: float
+    title: str = ""
+
+
+def clip_problem(body: ClipIn) -> str | None:
+    """Why a clip request can't be served, as a sentence for the viewer, or None."""
+    parts = urlsplit(body.url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return "Only http and https video links can be clipped."
+    if body.start_s < 0 or body.end_s <= body.start_s:
+        return "The clip has to end after it starts, and can't start before 0:00."
+    if body.end_s - body.start_s > media.MAX_SECONDS:
+        return "A clip can be at most 2 minutes long."
+    return None
+
+
+def clip_id(body: ClipIn) -> str:
+    key = f"{body.url}|{body.start_s:.3f}|{body.end_s:.3f}"
+    return "clip-" + hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
 class ApiError(Exception):
@@ -55,6 +82,7 @@ def create_app(data_root: Path) -> FastAPI:
     async def lifespan(_app: FastAPI):
         jobs.resume()
         yield
+        await asyncio.to_thread(jobs.shutdown)
 
     app = FastAPI(title="tubewatch", lifespan=lifespan)
     app.add_exception_handler(ApiError, lambda _req, e: error(e.status, e.sentence))
@@ -91,6 +119,27 @@ def create_app(data_root: Path) -> FastAPI:
         meta = process.update_meta(video.root, **fields)
         jobs.submit(video)
         return meta
+
+    clip_lock = threading.Lock()
+
+    @app.post("/api/videos/clip")
+    def clip(body: ClipIn):
+        problem = clip_problem(body)
+        if problem:
+            return error(400, problem)
+        video_id = clip_id(body)
+        with clip_lock:
+            if existing := library.get(video_id):
+                return existing.meta
+            info = media.probe(body.url, remote=True)
+            if info is None:
+                return error(400, "Couldn't read a video at that link.")
+            if body.start_s >= info["duration"]:
+                return error(400, "The clip starts after the end of the video.")
+            video = library.create_clip(video_id, body.title, body.url, body.start_s,
+                                        min(body.end_s, info["duration"]))
+        jobs.submit(video)
+        return video.meta
 
     @app.get("/api/videos/{video_id}")
     def get_video(video_id: str):

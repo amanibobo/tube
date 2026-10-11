@@ -10,13 +10,27 @@ import cv2
 MAX_SIDE, MAX_FPS = 1280, 30
 MAX_SECONDS = 120
 THUMB_STRIDE, THUMB_WIDTH = 5, 320
+REMOTE_PROTOCOLS = "http,https,tcp,tls"
+PROBE_TIMEOUT_S = 30
 
 
-def probe(path: Path) -> dict | None:
-    """{duration, fps, width, height} of the first video stream, or None when there is no video stream."""
-    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                          "stream=width,height,avg_frame_rate:format=duration", "-of", "json", str(path)],
-                         capture_output=True, text=True)
+def input_args(src: Path | str, remote: bool = False, start: float = 0.0) -> list[str]:
+    """ffmpeg/ffprobe input options. A remote source may only use REMOTE_PROTOCOLS, so a URL can never read a
+    local file or speak another protocol; ffmpeg's http protocol follows redirects. -ss before -i seeks on
+    the input side, so a remote source is range-read instead of downloaded from the start."""
+    args = ["-protocol_whitelist", REMOTE_PROTOCOLS] if remote else []
+    return args + (["-ss", str(start)] if start else []) + ["-i", str(src)]
+
+
+def probe(src: Path | str, remote: bool = False) -> dict | None:
+    """{duration, fps, width, height} of the first video stream, or None when there is none or it can't be
+    read."""
+    cmd = ["ffprobe", "-v", "error", *input_args(src, remote)[:-2], "-select_streams", "v:0", "-show_entries",
+           "stream=width,height,avg_frame_rate:format=duration", "-of", "json", str(src)]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=PROBE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return None
     info = json.loads(out.stdout or "{}")
     if out.returncode or not info.get("streams"):
         return None
@@ -26,15 +40,18 @@ def probe(path: Path) -> dict | None:
             "width": s["width"], "height": s["height"]}
 
 
-def normalize_video(src: Path, dst: Path, max_seconds: float = MAX_SECONDS) -> None:
-    """Re-encode to browser-safe H.264, long side at most MAX_SIDE, at most MAX_FPS, at most max_seconds.
-    Detection runs on this copy, so frame indices and pixel coordinates match what the viewer plays."""
-    fps = cv2.VideoCapture(str(src)).get(cv2.CAP_PROP_FPS) or MAX_FPS
+def normalize_video(src: Path | str, dst: Path, max_seconds: float = MAX_SECONDS, start: float = 0.0,
+                    remote: bool = False) -> None:
+    """Re-encode [start, start + max_seconds] to browser-safe H.264, long side at most MAX_SIDE, at most
+    MAX_FPS. Detection runs on this copy, so frame indices and pixel coordinates match what the viewer plays."""
+    info = probe(src, remote)
+    fps = info["fps"] if info and info["fps"] else MAX_FPS
     vf = f"scale='if(gte(iw,ih),min({MAX_SIDE},iw),-2)':'if(gte(iw,ih),-2,min({MAX_SIDE},ih))'"
     if fps > MAX_FPS + 0.5:
         vf += f",fps={MAX_FPS}"
     tmp = dst.with_name(dst.stem + ".tmp.mp4")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", str(max_seconds), "-vf", vf,
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *input_args(src, remote, start), "-t", str(max_seconds),
+                    "-vf", vf,
                     "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
                     "-movflags", "+faststart", str(tmp)], check=True)
     tmp.replace(dst)

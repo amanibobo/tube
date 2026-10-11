@@ -23,6 +23,9 @@ import { atlasUv, framePosition, pageOf, stripOf, type LibraryLayout, type PageL
 import { cardMaterial, dimUniform, dotMaterial, fadeUniform, markMaterial, planeMaterial, rawCardsUniform } from './shader'
 
 /** A frame under the pointer; rank is set when the pointer is on a result's lifted card. */
+/** Pointer travel (px) past which a press is a camera drag, not a click. */
+const DRAG_PX = 4
+
 export interface FrameHit { filmId: FilmId; frame: number; rank: number | null }
 export interface ScreenBox { left: number; top: number; right: number; bottom: number }
 /** Receives, every frame, the screen box of what the hover card describes (null when it is off-screen). */
@@ -41,31 +44,35 @@ interface SceneProps {
   stepped: Moment | null
   focus: FilmFocus | null
   onHover: (hit: FrameHit | null) => void
+  /** A click (not a drag) on a strip cell or a lifted card. */
+  onPick: (hit: FrameHit) => void
+  /** A click on empty canvas. */
+  onMiss: () => void
   /** Called per atlas page URL once its slices are on the plane, or once its texture failed every retry. */
   onPageSettled: (url: string) => void
   anchorSink: RefObject<AnchorSink | null>
 }
 
-export const Scene = memo(function Scene({ layout, search, hover, stepped, focus, onHover, onPageSettled, anchorSink }: SceneProps) {
+export const Scene = memo(function Scene({ layout, search, hover, stepped, focus, onHover, onPick, onMiss, onPageSettled, anchorSink }: SceneProps) {
   const moments = search.status === 'ready' ? search.moments : null
   const heat = search.status === 'ready' ? search.heat : null
   const cards = useRef(new Map<number, Mesh>())
   return (
-    <Canvas flat gl={{ alpha: true, antialias: true }} camera={{ fov: FOV, near: 0.05, far: 2000 }}>
+    <Canvas flat gl={{ alpha: true, antialias: true }} camera={{ fov: FOV, near: 0.05, far: 2000 }} onPointerMissed={onMiss}>
       <CameraRig layout={layout} stepped={stepped} focus={focus} cards={cards} />
       <Dimmer status={search.status} />
       <OwnerMarks layout={layout} />
       {layout.strips.flatMap((strip) => strip.pages.map((page) => (
         <LoadBoundary key={page.url} retry={{ clear: () => useLoader.clear(TextureLoader, [page.url]), giveUp: () => onPageSettled(page.url) }}>
           <Suspense fallback={null}>
-            <PageMesh strip={strip} page={page} heat={heat?.get(strip.film.id) ?? null} onHover={onHover} onLoaded={onPageSettled} />
+            <PageMesh strip={strip} page={page} heat={heat?.get(strip.film.id) ?? null} onHover={onHover} onPick={onPick} onLoaded={onPageSettled} />
           </Suspense>
         </LoadBoundary>
       )))}
       {moments && (
         <LoadBoundary resetOn={moments}>
           <Suspense fallback={null}>
-            <Cards layout={layout} moments={moments} onHover={onHover} cards={cards} />
+            <Cards layout={layout} moments={moments} onHover={onHover} onPick={onPick} cards={cards} />
           </Suspense>
         </LoadBoundary>
       )}
@@ -138,10 +145,11 @@ interface PageMeshProps {
   page: PageLayout
   heat: Uint8Array | null
   onHover: (hit: FrameHit | null) => void
+  onPick: (hit: FrameHit) => void
   onLoaded: (url: string) => void
 }
 
-const PageMesh = memo(function PageMesh({ strip, page, heat, onHover, onLoaded }: PageMeshProps) {
+const PageMesh = memo(function PageMesh({ strip, page, heat, onHover, onPick, onLoaded }: PageMeshProps) {
   const { film, slice } = strip
   const texture = useAtlas([page.url])[0]!
   const meshRef = useRef<InstancedMesh>(null)
@@ -194,6 +202,11 @@ const PageMesh = memo(function PageMesh({ strip, page, heat, onHover, onLoaded }
     e.stopPropagation()
     onHover({ filmId: film.id, frame: page.first + e.instanceId, rank: null })
   }
+  const pick = (e: ThreeEvent<MouseEvent>) => {
+    if (e.instanceId === undefined || e.delta > DRAG_PX) return
+    e.stopPropagation()
+    onPick({ filmId: film.id, frame: page.first + e.instanceId, rank: null })
+  }
 
   return (
     <instancedMesh
@@ -202,6 +215,7 @@ const PageMesh = memo(function PageMesh({ strip, page, heat, onHover, onLoaded }
       frustumCulled={false}
       onPointerMove={hit}
       onPointerOut={() => onHover(null)}
+      onClick={pick}
     />
   )
 })
@@ -244,7 +258,7 @@ function dotCloud(count: number) {
   return { geometry, position, alpha }
 }
 
-function Cards({ layout, moments, onHover, cards }: { layout: LibraryLayout; moments: Moment[]; onHover: (hit: FrameHit | null) => void; cards: RefObject<Map<number, Mesh>> }) {
+function Cards({ layout, moments, onHover, onPick, cards }: { layout: LibraryLayout; moments: Moment[]; onHover: (hit: FrameHit | null) => void; onPick: (hit: FrameHit) => void; cards: RefObject<Map<number, Mesh>> }) {
   const specs = useMemo(() => moments.slice(0, CARD_COUNT).flatMap((moment): CardSpec[] => {
     const strip = stripOf(layout, moment.filmId)
     const page = strip && pageOf(strip, moment.frame)
@@ -327,6 +341,11 @@ function Cards({ layout, moments, onHover, cards }: { layout: LibraryLayout; mom
           visible={false}
           onPointerMove={(e) => { e.stopPropagation(); onHover({ filmId: s.moment.filmId, frame: s.moment.frame, rank: s.moment.rank }) }}
           onPointerOut={() => onHover(null)}
+          onClick={(e) => {
+            if (e.delta > DRAG_PX) return
+            e.stopPropagation()
+            onPick({ filmId: s.moment.filmId, frame: s.moment.frame, rank: s.moment.rank })
+          }}
         />
       ))}
       <points geometry={parts.dots.geometry} material={parts.dotMaterial} frustumCulled={false} />
