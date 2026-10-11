@@ -20,6 +20,9 @@ export function Masthead({ identity, films }: { identity: Identity; films: reado
     <header className="masthead">
       <h1 className="masthead-title">{identity.title}</h1>
       {films && <p className="masthead-stats">{archiveStats(films, identity)}</p>}
+      <a className="masthead-back" href="/">
+        Home
+      </a>
       <a className="masthead-back" href={cubeHref()}>
         Back to the cube
       </a>

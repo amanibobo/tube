@@ -31,6 +31,7 @@ const PORTFOLIO_URL = 'https://amanibobo.dev'
 const DEVPOST_URL = 'https://devpost.com/software/tube'
 const DEEPWIKI_URL = 'https://deepwiki.com/amanibobo/tube'
 const HACKLANTA_URL = 'https://hacklanta.dev'
+const GITHUB_URL = 'https://github.com/amanibobo/tube'
 /** Set to the demo recording's URL once it exists; until then the dialog shows a still of the app. */
 const DEMO_SRC: string | null = null
 const DEMO_POSTER = '/demo-poster.jpg'
@@ -82,6 +83,15 @@ function DevpostMark() {
         d="M8.5 7h3.6c2.9 0 4.9 2 4.9 5s-2 5-4.9 5H8.5zm2.3 2.1v5.8h1.2c1.6 0 2.7-1.1 2.7-2.9s-1.1-2.9-2.7-2.9z"
         fill="currentColor"
       />
+    </svg>
+  )
+}
+
+/** The GitHub mark (Simple Icons), small and monochrome like the other link marks. */
+function GitHubMark() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
     </svg>
   )
 }
@@ -166,6 +176,10 @@ export function Landing() {
           <a href={DEEPWIKI_URL} className="lp-link lp-iconlink" target="_blank" rel="noreferrer">
             <img className="lp-deepwiki" src="https://deepwiki.com/favicon.ico" width={14} height={14} alt="" />
             DeepWiki
+          </a>
+          <a href={GITHUB_URL} className="lp-link lp-iconlink" target="_blank" rel="noreferrer">
+            <GitHubMark />
+            GitHub
           </a>
           <a href={PORTFOLIO_URL} className="lp-link" target="_blank" rel="noreferrer">
             Portfolio

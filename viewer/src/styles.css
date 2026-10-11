@@ -282,6 +282,100 @@ a.link {
   color: var(--fg-muted);
 }
 
+/* Voice search: the transcript is drawn over the hidden input, so the not-yet-final words can be muted. */
+.pill-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-self: stretch;
+}
+
+.pill input.hearing,
+.pill input.hearing::placeholder {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.pill-transcript {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pill-transcript > span {
+  flex: none;
+  min-width: 100%;
+}
+
+.pill-error {
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill-mic {
+  --level: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-right: calc(var(--s1) * -1);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: border-color 200ms ease, color 150ms ease;
+}
+
+.pill-mic:hover {
+  color: var(--fg);
+}
+
+.pill-mic:is(.requesting, .connecting, .listening, .finishing) {
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+/* the live level: a ring that swells and brightens with the microphone's loudness */
+.pill-mic::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--fg);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(calc(1 + var(--level) * 0.4));
+  transition: transform 120ms ease-out, opacity 200ms ease;
+  pointer-events: none;
+}
+
+.pill-mic.listening::after {
+  opacity: calc(0.15 + var(--level) * 0.6);
+}
+
+.pill-mic.error {
+  color: var(--fg-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-mic::after {
+    transition: none;
+  }
+}
+
 .pill-clear {
   padding: 0;
   border: 0;

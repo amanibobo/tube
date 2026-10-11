@@ -35,6 +35,9 @@ export function Library() {
         </button>
       </div>
       <div className="library-links">
+        <a className="link muted small" href="/">
+          Home
+        </a>
         {STATIC ? (
           <a
             className="link muted small"
