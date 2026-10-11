@@ -8,11 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&display=swap" rel="stylesheet" />
-    <style>html, body { background: #050505; } html.landing, html.landing body { background: #f3f1ea; } html.landing.dark, html.landing.dark body { background: #0b0b0b; }</style>
+    <style>html, body { background: #050505; } html.landing, html.landing body { background: #0b0b0b; }</style>
     <script>
       if (location.pathname === '/') {
         document.documentElement.classList.add('landing')
-        try { if (localStorage.getItem('tubewatch-theme') === 'dark') document.documentElement.classList.add('dark') } catch {}
       }
     </script>
   </head>

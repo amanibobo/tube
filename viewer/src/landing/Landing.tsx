@@ -4,25 +4,12 @@ import { DitherCube, type Palette } from './DitherCube'
 import '../base.css'
 import './landing.css'
 
-type Theme = 'light' | 'dark'
-
-/** The app's tube palette (yellow-green, pink, cyan, mint, lavender, peach, then answer red), deepened on paper. */
-const PAPER: Record<
-  Theme,
-  { back: string; grain: [string, string, string]; ink: [number, number, number]; palette: Palette }
-> = {
-  light: {
-    back: '#f3f1ea',
-    grain: ['#ece9e0', '#f7f5ef', '#e9e6dd'],
-    ink: [38, 32, 24],
-    palette: ['#86a312', '#dc4f93', '#139fb8', '#22a06b', '#7559d6', '#d9801c', '#e5372b'],
-  },
-  dark: {
-    back: '#0b0b0b',
-    grain: ['#121212', '#0e0e0e', '#161616'],
-    ink: [236, 234, 228],
-    palette: ['#dcf26a', '#ff9ed2', '#6ef0ff', '#8ff5c2', '#c6b3ff', '#ffc98a', '#ff3b30'],
-  },
+/** The dark paper: grain colors, ink for the dashes, and the app's tube palette (then answer red). */
+const PAPER: { back: string; grain: [string, string, string]; ink: [number, number, number]; palette: Palette } = {
+  back: '#0b0b0b',
+  grain: ['#121212', '#0e0e0e', '#161616'],
+  ink: [236, 234, 228],
+  palette: ['#dcf26a', '#ff9ed2', '#6ef0ff', '#8ff5c2', '#c6b3ff', '#ffc98a', '#ff3b30'],
 }
 
 const APP_URL = '/app'
@@ -32,6 +19,7 @@ const DEVPOST_URL = 'https://devpost.com/software/tube'
 const DEEPWIKI_URL = 'https://deepwiki.com/amanibobo/tube'
 const HACKLANTA_URL = 'https://hacklanta.dev'
 const GITHUB_URL = 'https://github.com/amanibobo/tube'
+const LINKEDIN_URL = 'https://www.linkedin.com/in/amanibobo'
 /** Set to the demo recording's URL once it exists; until then the dialog shows a still of the app. */
 const DEMO_SRC: string | null = null
 const DEMO_POSTER = '/demo-poster.jpg'
@@ -96,32 +84,13 @@ function GitHubMark() {
   )
 }
 
-function storedTheme(): Theme {
-  try {
-    return localStorage.getItem('tubewatch-theme') === 'dark' ? 'dark' : 'light'
-  } catch {
-    return 'light'
-  }
-}
-
 /** The landing: four corners of small type and one dashed space-time cube. Clicking the cube opens the app. */
 export function Landing() {
-  const [theme, setTheme] = useState<Theme>(storedTheme)
   const [demo, setDemo] = useState(false)
-  const next: Theme = theme === 'dark' ? 'light' : 'dark'
-  const colors = PAPER[theme]
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    try {
-      localStorage.setItem('tubewatch-theme', theme)
-    } catch {
-      // private windows can refuse storage; the theme just won't persist
-    }
-  }, [theme])
+  const colors = PAPER
 
   return (
-    <main className="lp" data-theme={theme}>
+    <main className="lp">
       <div className="lp-grain" aria-hidden>
         <GrainGradient
           style={{ width: '100%', height: '100%' }}
@@ -151,10 +120,15 @@ export function Landing() {
 
       <footer className="lp-corners">
         <div className="lp-about">
-          <a href={HACKLANTA_URL} className="lp-built" target="_blank" rel="noreferrer">
-            <span>Built for</span>
-            <img src="/hacklanta.png" width={36} height={28} alt="Hacklanta '26" />
-          </a>
+          <div className="lp-credits">
+            <a href={HACKLANTA_URL} className="lp-built" target="_blank" rel="noreferrer">
+              <span>Built for</span>
+              <img src="/hacklanta.png" width={36} height={28} alt="Hacklanta '26" />
+            </a>
+            <a href={LINKEDIN_URL} className="lp-built" target="_blank" rel="noreferrer">
+              Built by Amani
+            </a>
+          </div>
           <p className="lp-blurb">
             Cities have thousands of traffic cameras, and almost nobody watches them. Tube stacks a clip into a cube
             where every car and person becomes a tube through time, so “every time a person and a car got close” turns
@@ -162,13 +136,6 @@ export function Landing() {
           </p>
         </div>
         <nav className="lp-links" aria-label="Links">
-          <button
-            type="button"
-            className="lp-square"
-            onClick={() => setTheme(next)}
-            aria-label={`Switch to ${next} mode`}
-            title={`Switch to ${next} mode`}
-          />
           <a href={DEVPOST_URL} className="lp-link lp-iconlink" target="_blank" rel="noreferrer">
             <DevpostMark />
             Devpost

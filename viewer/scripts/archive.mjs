@@ -149,7 +149,7 @@ check(await page.locator('.drop-line').isVisible(), `the upload panel opens (${a
 await shot(page, 'archive-upload-panel')
 await page.locator('.panel-close').click()
 
-await page.click('.masthead-back')
+await page.click('.masthead-back >> text=Back to the cube')
 await page.waitForURL(`${ORIGIN}/app?v=${VIDEO}`)
 await page.waitForFunction(() => window.__tubewatch?.store.getState().tubes, null, { timeout: 60000 })
 {
