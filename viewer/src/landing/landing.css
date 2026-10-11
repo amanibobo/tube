@@ -201,12 +201,17 @@
   overflow: hidden;
 }
 
-.lp-player video,
-.lp-player img {
+.lp-player iframe {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  border: 0;
+  outline: none;
+}
+
+.lp-dialog:focus,
+.lp-dialog:focus-visible {
+  outline: none;
 }
 
 .lp-dialog-bar {

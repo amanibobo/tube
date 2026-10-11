@@ -19,11 +19,11 @@ const DEEPWIKI_URL = 'https://deepwiki.com/amanibobo/tube'
 const HACKLANTA_URL = 'https://hacklanta.dev'
 const GITHUB_URL = 'https://github.com/amanibobo/tube'
 const LINKEDIN_URL = 'https://www.linkedin.com/in/amanibobo'
-/** Set to the demo recording's URL once it exists; until then the dialog shows a still of the app. */
-const DEMO_SRC: string | null = null
-const DEMO_POSTER = '/demo-poster.jpg'
+/** The demo recording on YouTube, embedded without tracking cookies. */
+const DEMO_EMBED = 'https://www.youtube-nocookie.com/embed/KtIpRFvTP2E?autoplay=1&rel=0'
+const DEMO_URL = 'https://www.youtube.com/watch?v=KtIpRFvTP2E'
 
-/** The demo in a dialog over the page. Until DEMO_SRC is set it shows a still of the app. */
+/** The demo in a dialog over the page. The player mounts only while open, so closing stops playback. */
 function DemoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
 
@@ -43,14 +43,19 @@ function DemoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
       aria-label="Demo video"
     >
       <div className="lp-player">
-        {open && DEMO_SRC ? (
-          <video src={DEMO_SRC} poster={DEMO_POSTER} controls autoPlay playsInline />
-        ) : (
-          <img src={DEMO_POSTER} alt="Tube showing a junction clip with every car's tube lit" />
+        {open && (
+          <iframe
+            src={DEMO_EMBED}
+            title="Tube demo"
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+            allowFullScreen
+          />
         )}
       </div>
       <div className="lp-dialog-bar">
-        <span className="lp-muted">{DEMO_SRC ? 'Tube demo' : 'Demo video coming soon'}</span>
+        <a className="lp-link" href={DEMO_URL} target="_blank" rel="noreferrer">
+          Watch on YouTube
+        </a>
         <button type="button" className="lp-close" onClick={onClose} aria-label="Close">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
             <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
