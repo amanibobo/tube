@@ -1,16 +1,19 @@
 import { create } from 'zustand'
-import { api } from './api'
+import { api, STATIC } from './api'
+import { chooseTrack, DEFAULT_TRACK_TEXT } from './classes'
 import type { Sampling } from './scene/geometry'
 import { requestJump, resetMotion } from './scene/motion'
 import { samplingFor } from './scene/space'
 import { isClassSearch, type Search } from './search'
-import type { JobEvent, NearMiss, Track, Tubes, VideoId, VideoMeta } from './types'
+import type { JobEvent, NearMiss, Track, Trackable, Tubes, VideoId, VideoMeta } from './types'
 import { hasTubes, isVideoFile, titleFromFile } from './videos'
 
 export type FrameSource = 'video' | 'scene' | 'tween'
 
+/** A picked file waits in `choosing` while the user says what to track; Start sends it, Cancel drops it. */
 export type Upload =
   | { kind: 'idle' }
+  | { kind: 'choosing'; file: File; text: string; error: string | null }
   | { kind: 'sending'; name: string; loaded: number; total: number }
   | { kind: 'rejected'; message: string }
 
@@ -35,6 +38,8 @@ type State = VideoState & {
   loadError: string | null
   libraryOpen: boolean
   upload: Upload
+  /** What the detector can track, fetched when a file is first picked. */
+  trackable: Trackable | null
   notice: { id: VideoId; text: string } | null
   panelOpen: boolean
 }
@@ -43,7 +48,10 @@ type Actions = {
   start(): Promise<void>
   select(id: VideoId, force?: boolean): void
   toggleLibrary(open?: boolean): void
-  pickFile(file: File): Promise<void>
+  pickFile(file: File): void
+  editTrack(text: string): void
+  startUpload(): Promise<void>
+  cancelUpload(): void
   setFrame(f: number, source: FrameSource): void
   jumpTo(f: number): void
   setScrubbing(scrubbing: boolean): void
@@ -183,11 +191,11 @@ export const useStore = create<State & Actions>((set, get) => {
     loadError: null,
     libraryOpen: false,
     upload: { kind: 'idle' },
+    trackable: null,
     notice: null,
     panelOpen: true,
 
     async start() {
-      api.warm()
       try {
         const library = await api.videos()
         set({ library })
@@ -224,16 +232,36 @@ export const useStore = create<State & Actions>((set, get) => {
       if (next) void api.videos().then((library) => set({ library }), () => {})
     },
 
-    async pickFile(file) {
+    pickFile(file) {
+      if (STATIC) return set({ upload: { kind: 'rejected', message: 'Uploads need Tube running locally.' } })
       if (!isVideoFile(file)) {
         return set({ upload: { kind: 'rejected', message: `${file.name} isn’t a video. Try an MP4 or MOV file.` } })
       }
       api.warm()
-      set({ upload: { kind: 'sending', name: file.name, loaded: 0, total: file.size }, libraryOpen: false })
-      const result = await api.upload(file, titleFromFile(file.name), (loaded, total) =>
+      if (!get().trackable) void api.trackable().then((trackable) => set({ trackable }), () => {})
+      set({ upload: { kind: 'choosing', file, text: DEFAULT_TRACK_TEXT, error: null }, libraryOpen: false })
+    },
+
+    editTrack(text) {
+      const upload = get().upload
+      if (upload.kind === 'choosing') set({ upload: { ...upload, text, error: null } })
+    },
+
+    cancelUpload() {
+      if (get().upload.kind === 'choosing') set({ upload: { kind: 'idle' } })
+    },
+
+    async startUpload() {
+      const choosing = get().upload
+      if (choosing.kind !== 'choosing') return
+      const { file } = choosing
+      const choice = chooseTrack(choosing.text, get().trackable)
+      if (!choice.ok) return set({ upload: { ...choosing, error: choice.message } })
+      set({ upload: { kind: 'sending', name: file.name, loaded: 0, total: file.size } })
+      const result = await api.upload(file, titleFromFile(file.name), choice.track, (loaded, total) =>
         set({ upload: { kind: 'sending', name: file.name, loaded, total } }),
       )
-      if (!result.ok) return set({ upload: { kind: 'rejected', message: result.message } })
+      if (!result.ok) return set({ upload: { ...choosing, error: result.message } })
       const { meta } = result
       set({
         upload: { kind: 'idle' },

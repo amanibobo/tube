@@ -1,4 +1,5 @@
-"""The seven geometry tools, as pure functions over an in-memory Dataset.
+"""The geometry tools, as pure functions over an in-memory Dataset. Classes are whatever the video was tracked
+for ("car", "dog", "player"); traffic semantics come from each track's role (see pipeline.derive.ROLES).
 
 Every tool returns a list of Hit. A Hit is one answer row: a label, a key frame to jump to, a score,
 and the track spans to light up. count and highlight consume Hits, so any tool's output can feed them.
@@ -13,7 +14,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from pipeline.derive import DEFAULT_PARAMS, VEHICLES, VULNERABLE
+from pipeline.derive import DEFAULT_PARAMS, role
 
 RUN_GAP = 5
 HIGHLIGHT_RED = "#ff3b30"
@@ -24,8 +25,10 @@ class Dataset:
     root: Path
     video: dict
     classes: dict[int, str]
+    roles: dict[int, str | None]
     stats: pd.DataFrame
     pairs: pd.DataFrame
+    outlines: pd.DataFrame
     zones: list[dict]
 
     @property
@@ -41,14 +44,31 @@ class Dataset:
 def load_dataset(root: Path) -> Dataset:
     tubes = json.loads((root / "tubes.json").read_text())
     zones_path = root / "zones.json"
+    outlines = pd.DataFrame([(t["id"], fr["f"], *fr["bbox"], fr["contour"]) for t in tubes["tracks"]
+                             for fr in t["frames"]], columns=["track_id", "f", "x0", "y0", "x1", "y1", "contour"])
     return Dataset(
         root=root,
         video=tubes["video"],
         classes={t["id"]: t["class"] for t in tubes["tracks"]},
+        roles={t["id"]: role(t) for t in tubes["tracks"]},
         stats=pd.read_parquet(root / "stats.parquet"),
         pairs=pd.read_parquet(root / "pairs.parquet"),
+        outlines=outlines,
         zones=json.loads(zones_path.read_text()) if zones_path.exists() else [],
     )
+
+
+def class_ids(ds: Dataset, cls: str) -> list[int]:
+    """Track ids of a class. A class the clip doesn't have raises a sentence that lists the ones it has."""
+    ids = [tid for tid, c in ds.classes.items() if c == cls]
+    if not ids:
+        have = ", ".join(sorted(set(ds.classes.values()))) or "none"
+        raise ValueError(f"This video has no {cls!r} tracks. Its classes are: {have}.")
+    return ids
+
+
+def class_role(ds: Dataset, cls: str) -> str | None:
+    return ds.roles[class_ids(ds, cls)[0]]
 
 
 @dataclass
@@ -97,13 +117,20 @@ def _in_time(f: int, ds: Dataset, t_start: float | None, t_end: float | None) ->
 def filter_tracks(ds: Dataset, cls: str | None = None, min_speed: float | None = None,
                   max_speed: float | None = None, min_duration_sec: float | None = None,
                   t_start: float | None = None, t_end: float | None = None,
-                  sort_by_speed: bool = False, top_k: int | None = None) -> list[Hit]:
-    """Tracks by class, peak speed (px/s), duration, and overlap with a time range. Score = peak speed."""
+                  sort_by: str | None = None, top_k: int | None = None) -> list[Hit]:
+    """Tracks by class, peak speed (px/s), duration, and overlap with a time range.
+    sort_by "peak_speed" or "distance" (total px traveled) orders the result, highest first, and makes that
+    the score; otherwise the score is the peak speed."""
+    if sort_by not in (None, "peak_speed", "distance"):
+        raise ValueError("sort_by must be 'peak_speed' or 'distance'")
+    if cls is not None:
+        class_ids(ds, cls)
     hits = []
     for tid, g in ds.stats.groupby("track_id"):
         if cls is not None and ds.classes[tid] != cls:
             continue
         peak = g.speed.max()
+        traveled = float(g.speed.sum() / ds.fps)
         f0, f1 = int(g.f.iloc[0]), int(g.f.iloc[-1])
         if min_speed is not None and peak < min_speed or max_speed is not None and peak > max_speed:
             continue
@@ -112,20 +139,45 @@ def filter_tracks(ds: Dataset, cls: str | None = None, min_speed: float | None =
         if t_start is not None and f1 / ds.fps < t_start or t_end is not None and f0 / ds.fps > t_end:
             continue
         f_peak = int(g.f.iloc[int(np.argmax(g.speed.to_numpy()))])
-        hits.append(Hit(f"{ds.classes[tid]} {tid}, peak {peak:.0f} px/s", f_peak, float(peak), [(tid, f0, f1)]))
-    if sort_by_speed:
+        if sort_by == "distance":
+            hits.append(Hit(f"{ds.classes[tid]} {tid}, moved {traveled:.0f} px", f_peak, traveled, [(tid, f0, f1)]))
+        else:
+            hits.append(Hit(f"{ds.classes[tid]} {tid}, peak {peak:.0f} px/s", f_peak, float(peak), [(tid, f0, f1)]))
+    if sort_by:
         hits.sort(key=lambda h: -h.score)
     return hits[:top_k] if top_k else hits
 
 
 def near(ds: Dataset, class_a: str = "person", class_b: str = "car", max_dist: float | None = None,
-         moving_only: bool = True, t_start: float | None = None, t_end: float | None = None) -> list[Hit]:
-    """Episodes where a person/bicycle and a vehicle are within max_dist px (default: the clip's close_px).
-    Score = near-miss score."""
-    if class_a in VEHICLES:
-        class_a, class_b = class_b, class_a
-    if class_a not in VULNERABLE or class_b not in VEHICLES:
-        raise ValueError(f"near() covers {'/'.join(VULNERABLE)} vs {'/'.join(VEHICLES)} only")
+         moving_only: bool | None = None, t_start: float | None = None, t_end: float | None = None) -> list[Hit]:
+    """Episodes where a track of class_a and a track of class_b (the same class works too) come within max_dist
+    px, default the clip's close_px, which scales with object size.
+
+    A person or two-wheeler against a vehicle uses the traffic geometry (feet to ground line, from the pairs
+    table); moving_only defaults to on, and the score is the near-miss score, highest first. Any other pair uses
+    the gap between outlines; moving_only (either track moving) defaults to off, the score is the gap in px, and
+    the closest come first."""
+    roles = {class_role(ds, class_a), class_role(ds, class_b)}
+    if roles == {"vulnerable", "vehicle"}:
+        if class_role(ds, class_a) == "vehicle":
+            class_a, class_b = class_b, class_a
+        return _traffic_near(ds, class_a, class_b, max_dist, moving_only is not False, t_start, t_end)
+    return _outline_near(ds, class_a, class_b, max_dist, bool(moving_only), t_start, t_end)
+
+
+def _episodes(ds: Dataset, p: pd.DataFrame, t_start, t_end):
+    """(a, b, f0, f1, closest row) for each run of frames a pair spends within range."""
+    for (a, b), g in p.groupby(["a", "b"]):
+        frames = g.f.to_numpy()
+        for f0, f1 in _runs(frames, np.ones(len(frames), bool), gap=15):
+            ep = g[(g.f >= f0) & (g.f <= f1)]
+            closest = ep[ep.dist <= ep.dist.min() + 0.5]
+            best = closest.iloc[len(closest) // 2]
+            if _in_time(int(best.f), ds, t_start, t_end):
+                yield int(a), int(b), f0, f1, best
+
+
+def _traffic_near(ds, class_a, class_b, max_dist, moving_only, t_start, t_end) -> list[Hit]:
     p = ds.pairs[ds.pairs.dist <= (max_dist or ds.params["close_px"])]
     p = p[p.a.map(ds.classes).eq(class_a) & p.b.map(ds.classes).eq(class_b)]
     speed = ds.stats.set_index(["track_id", "f"]).speed
@@ -133,30 +185,50 @@ def near(ds: Dataset, class_a: str = "person", class_b: str = "car", max_dist: f
     if moving_only:
         p = p[p.v > ds.params["moving_speed"]]
     hits = []
-    for (a, b), g in p.groupby(["a", "b"]):
-        frames = g.f.to_numpy()
-        for f0, f1 in _runs(frames, np.ones(len(frames), bool), gap=15):
-            ep = g[(g.f >= f0) & (g.f <= f1)]
-            closest = ep[ep.dist <= ep.dist.min() + 0.5]
-            best = closest.iloc[len(closest) // 2]
-            f = int(best.f)
-            if not _in_time(f, ds, t_start, t_end):
-                continue
-            score = float(best.v) / max(float(best.dist), 1.0)
-            label = f"{ds.classes[a]} {a} and {ds.classes[b]} {b}, {best.dist:.0f} px at {best.v:.0f} px/s"
-            hits.append(Hit(label, f, score, [(a, f0, f1), (b, f0, f1)], float(best.dist),
-                            {"a": int(a), "b": int(b)}))
-    hits.sort(key=lambda h: -h.score)
-    return hits
+    for a, b, f0, f1, best in _episodes(ds, p, t_start, t_end):
+        score = float(best.v) / max(float(best.dist), 1.0)
+        label = f"{ds.classes[a]} {a} and {ds.classes[b]} {b}, {best.dist:.0f} px at {best.v:.0f} px/s"
+        hits.append(Hit(label, int(best.f), score, [(a, f0, f1), (b, f0, f1)], float(best.dist), {"a": a, "b": b}))
+    return sorted(hits, key=lambda h: -h.score)
+
+
+def _outline_near(ds, class_a, class_b, max_dist, moving_only, t_start, t_end) -> list[Hit]:
+    limit = max_dist or ds.params["close_px"]
+    o = ds.outlines
+    m = o[o.track_id.isin(class_ids(ds, class_a))].merge(
+        o[o.track_id.isin(class_ids(ds, class_b))], on="f", suffixes=("_a", "_b"))
+    m = m[m.track_id_a < m.track_id_b] if class_a == class_b else m[m.track_id_a != m.track_id_b]
+    gap_x = np.maximum(0, np.maximum(m.x0_a - m.x1_b, m.x0_b - m.x1_a))
+    gap_y = np.maximum(0, np.maximum(m.y0_a - m.y1_b, m.y0_b - m.y1_a))
+    m = m[np.hypot(gap_x, gap_y) <= limit]
+    if m.empty:
+        return []
+    poly = lambda col: shapely.make_valid(np.array([shapely.Polygon(c) for c in m[col]], dtype=object))  # noqa: E731
+    p = pd.DataFrame({"a": m.track_id_a.to_numpy(), "b": m.track_id_b.to_numpy(), "f": m.f.to_numpy(),
+                      "dist": shapely.distance(poly("contour_a"), poly("contour_b"))})
+    p = p[p.dist <= limit]
+    if moving_only:
+        speed = ds.stats.set_index(["track_id", "f"]).speed
+        va = speed.reindex(pd.MultiIndex.from_arrays([p.a, p.f])).to_numpy()
+        vb = speed.reindex(pd.MultiIndex.from_arrays([p.b, p.f])).to_numpy()
+        p = p[np.fmax(va, vb) > ds.params["moving_speed"]]
+    hits = [Hit(f"{ds.classes[a]} {a} and {ds.classes[b]} {b}, {best.dist:.0f} px apart", int(best.f),
+                float(best.dist), [(a, f0, f1), (b, f0, f1)], float(best.dist), {"a": a, "b": b})
+            for a, b, f0, f1, best in _episodes(ds, p, t_start, t_end)]
+    return sorted(hits, key=lambda h: h.min_dist)
 
 
 def rank_near_misses(ds: Dataset, top_k: int = 10, t_start: float | None = None,
                      t_end: float | None = None) -> list[Hit]:
-    """PRD v1: per person/bicycle-vehicle pair, the closest moving pass under close_px, scored
-    vehicle speed / min distance, highest first."""
+    """PRD v1, traffic only: per person/two-wheeler and vehicle pair, the closest moving pass under close_px,
+    scored vehicle speed / min distance, highest first. Empty for a clip without people and vehicles."""
+    by_role: dict[str | None, set[str]] = {}
+    for tid, cls in ds.classes.items():
+        by_role.setdefault(ds.roles[tid], set()).add(cls)
     best: dict[tuple[int, int], Hit] = {}
-    for cls in VULNERABLE:
-        for h in near(ds, cls, VEHICLES[0], None, True, t_start, t_end):
+    pairs = [(a, b) for a in sorted(by_role.get("vulnerable", ())) for b in sorted(by_role.get("vehicle", ()))]
+    for a_cls, b_cls in pairs:
+        for h in _traffic_near(ds, a_cls, b_cls, None, True, t_start, t_end):
             key = (h.extra["a"], h.extra["b"])
             if key not in best or h.min_dist < best[key].min_dist:
                 best[key] = h

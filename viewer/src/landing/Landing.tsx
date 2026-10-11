@@ -108,7 +108,7 @@ export function Landing() {
       <header className="lp-head">
         <div className="lp-title">
           <span className="lp-name">Tube</span>
-          <span className="lp-muted">Space-time search for traffic video</span>
+          <span className="lp-muted">Space-time search for video</span>
         </div>
       </header>
 
@@ -130,9 +130,9 @@ export function Landing() {
             </a>
           </div>
           <p className="lp-blurb">
-            Cities have thousands of traffic cameras, and almost nobody watches them. Tube stacks a clip into a cube
-            where every car and person becomes a tube through time, so “every time a person and a car got close” turns
-            into geometry. Near misses show up before a crash report does.
+            Cameras record millions of hours of video every day, and almost nobody watches it. Tube stacks a video into
+            a 3D cube where everything that moves becomes a tube through time, so a question like “when did two of them
+            get close” turns into exact geometry. Search a whole archive by what happened, pin the moment, measure it.
           </p>
         </div>
         <nav className="lp-links" aria-label="Links">

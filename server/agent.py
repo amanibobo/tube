@@ -9,16 +9,18 @@ import threading
 import anthropic
 
 from server import tools as T
-from server.plans import DEMO_PLANS
+from server.plans import plans_for
 from server.tools import Dataset, Hit
 
 MODEL = "claude-sonnet-5-5"
 MAX_TURNS = 8
 HITS_SHOWN = 30
 
-SYSTEM = """You answer questions about traffic camera footage by calling geometry tools.
+SYSTEM = """You answer questions about a video by calling geometry tools.
 
-Every car, person, and bicycle is a track with a centroid per frame. Speeds are px/s and distances px.
+Every tracked object is a track with a position per frame; the context lists the clip's classes (for traffic:
+car, person, bicycle; for other clips whatever was tracked, such as dog or player). Use those class names
+exactly. Speeds are px/s and distances px.
 Tools return a result_id plus rows. Pass a result_id to later tools to narrow or count it.
 Finish every answer by calling highlight exactly once with the result_ids to show, a short caption,
 and a one-sentence summary that states the answer. Never answer in plain text alone.
@@ -31,7 +33,9 @@ Typical plans:
 - "which cars stopped in the crosswalk": filter_tracks(car) -> stopped(min_sec 1, zone crosswalk) -> highlight
 - "top 3 most dangerous moments": rank_near_misses(top_k 3) -> highlight
 - "how many people crossed per minute": filter_tracks(person) -> in_zone(crosswalk) -> count(minute) -> highlight
-- "fastest car": filter_tracks(car, sort_by_speed, top_k 1) -> highlight"""
+- "fastest car": filter_tracks(car, sort_by peak_speed, top_k 1) -> highlight
+- "when did two dogs get closest": near(dog, dog) -> highlight, track_ids of the first row
+- "which dog moved the most": filter_tracks(dog, sort_by distance, top_k 1) -> highlight"""
 
 TIME_PROPS = {
     "t_start": {"type": "number", "description": "Only results at or after this time, seconds."},
@@ -41,24 +45,27 @@ TRACKS_PROPS = {
     "result_id": {"type": "string", "description": "Restrict to the tracks in this earlier result."},
     "track_ids": {"type": "array", "items": {"type": "integer"}, "description": "Restrict to these tracks."},
 }
-CLASS = {"type": "string", "enum": ["car", "person", "bicycle"]}
+CLASS = {"type": "string", "description": "A class this clip has, as listed in the context (e.g. car, dog)."}
 
 TOOLS = [
-    {"name": "filter_tracks", "description": "Tracks by class, peak speed, duration and time range. "
-     "Score is the track's peak speed.",
+    {"name": "filter_tracks", "description": "Tracks by class, peak speed, duration and time range. Score is "
+     "the track's peak speed, or with sort_by distance the total px it traveled.",
      "input_schema": {"type": "object", "properties": {
          "cls": CLASS,
          "min_speed": {"type": "number", "description": "Minimum peak speed, px/s."},
          "max_speed": {"type": "number", "description": "Maximum peak speed, px/s."},
          "min_duration_sec": {"type": "number"},
-         "sort_by_speed": {"type": "boolean", "description": "Fastest first."},
+         "sort_by": {"type": "string", "enum": ["peak_speed", "distance"],
+                     "description": "Highest first: peak speed (fastest) or total distance traveled (moved most)."},
          "top_k": {"type": "integer"}, **TIME_PROPS}}},
-    {"name": "near", "description": "Episodes where a person or bicycle and a car came within max_dist px. "
-     "Score is car speed / distance, highest first.",
+    {"name": "near", "description": "Episodes where tracks of two classes (or two tracks of one class) came "
+     "within max_dist px. Person or bicycle vs car: score is car speed / distance, highest first. Any other "
+     "pair: score is the gap between outlines in px, closest first.",
      "input_schema": {"type": "object", "properties": {
          "class_a": CLASS, "class_b": CLASS,
          "max_dist": {"type": "number", "description": "Pixels. Default: the clip's close distance."},
-         "moving_only": {"type": "boolean", "description": "Only while the car moves. Default true."},
+         "moving_only": {"type": "boolean",
+                         "description": "Only while moving. Default true for person/bicycle vs car, else false."},
          **TIME_PROPS}, "required": ["class_a", "class_b"]}},
     {"name": "in_zone", "description": "Visits into a drawn zone (entry/exit frames). Score is dwell seconds.",
      "input_schema": {"type": "object", "properties": {
@@ -68,8 +75,8 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "min_sec": {"type": "number", "description": "Default 1."},
          "zone_id": {"type": "string", "description": "Zone id or name."}, **TRACKS_PROPS}}},
-    {"name": "rank_near_misses", "description": "Person/bicycle-car near misses ranked by car speed / "
-     "min distance, one per pair, highest first.",
+    {"name": "rank_near_misses", "description": "Traffic only: person/bicycle-car near misses ranked by car "
+     "speed / min distance, one per pair, highest first. Empty when the clip has no people and cars.",
      "input_schema": {"type": "object", "properties": {"top_k": {"type": "integer"}, **TIME_PROPS}}},
     {"name": "count", "description": "Distinct tracks in a result, grouped by class or minute.",
      "input_schema": {"type": "object", "properties": {
@@ -109,9 +116,10 @@ class Agent:
         self.lock = threading.Lock()
 
     def seed_demo(self) -> list[str]:
-        """(Re)answer the demo questions from their tool plans for the current zones. Returns the keys written."""
+        """(Re)answer this clip's demo questions from their tool plans for the current zones. Returns the keys
+        written."""
         key, written = zones_key(self.ds), []
-        for q, plan in DEMO_PLANS.items():
+        for q, plan in plans_for(self.ds).items():
             try:
                 self.cache[q] = {**plan(self.ds), "zones_key": key}
             except ValueError as e:
@@ -154,8 +162,10 @@ def context(ds: Dataset) -> str:
         counts[c] = counts.get(c, 0) + 1
     zones = ", ".join(f"{z['name']} (id {z['id']})" for z in ds.zones) or "none drawn"
     p = ds.params
+    unit = "person" if "person" in counts else max(counts, key=counts.get, default="object")
+    classes = ", ".join(f"{c} ({n} tracks)" for c, n in sorted(counts.items()))
     return (f"Clip {v['id']}: {v['frames']} frames at {v['fps']} fps ({v['frames'] / v['fps']:.0f}s), "
-            f"{v['width']}x{v['height']} px. Tracks: {counts}. Zones: {zones}. Scale: a person is about "
+            f"{v['width']}x{v['height']} px. Classes: {classes}. Zones: {zones}. Scale: a {unit} is about "
             f"{p['person_h']} px tall, close means within {p['close_px']:g} px, moving means faster than "
             f"{p['moving_speed']:g} px/s, stopped means slower than {p['stop_speed']:g} px/s.")
 

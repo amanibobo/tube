@@ -13,6 +13,14 @@ import shapely
 
 VULNERABLE = ("person", "bicycle")
 VEHICLES = ("car",)
+# Traffic roles come from the detector's class, so a named track ("pedestrian", "player") keeps traffic geometry.
+ROLES = {"person": "vulnerable", "bicycle": "vulnerable", "motorcycle": "vulnerable",
+         "car": "vehicle", "bus": "vehicle", "truck": "vehicle", "vehicle": "vehicle"}
+
+
+def role(track: dict) -> str | None:
+    """"vulnerable", "vehicle", or None for anything outside traffic (a dog, a ball)."""
+    return ROLES.get(track.get("source_class", track["class"]))
 DEFAULT_PARAMS = {"person_h": 130, "close_px": 80, "moving_speed": 50, "stop_speed": 20, "view": "oblique"}
 # Oblique clips: "close" is feet to wheel line within 1.5 person heights (about 2.5 m); speeds keep the
 # synthetic scene's ratios. Top-view synthetic data sets its own params.
@@ -67,8 +75,10 @@ def stats_from_tracks(tracks: list[dict], fps: float, view: str = "oblique") -> 
 
 
 def params_for(tracks: list[dict]) -> dict:
-    """Scale-dependent thresholds for an oblique clip, from the median person box height."""
-    heights = [fr["bbox"][3] - fr["bbox"][1] for t in tracks if t["class"] == "person" for fr in t["frames"]]
+    """Scale-dependent thresholds for an oblique clip, from the median box height of the people in it, or of
+    whatever was tracked when there are none (person_h is then that object's height)."""
+    people = [t for t in tracks if t.get("source_class", t["class"]) == "person"]
+    heights = [fr["bbox"][3] - fr["bbox"][1] for t in people or tracks for fr in t["frames"]]
     if not heights:
         return dict(DEFAULT_PARAMS)
     h = float(np.median(heights))
@@ -76,19 +86,19 @@ def params_for(tracks: list[dict]) -> dict:
 
 
 def pairs_from_tracks(tracks: list[dict], stats: pd.DataFrame, max_dist: float, view: str = "oblique") -> pd.DataFrame:
-    """Rows (a, b, f, dist, rel_speed): a is a person or bicycle, b a vehicle.
+    """Rows (a, b, f, dist, rel_speed): a is a person or two-wheeler, b a vehicle (see ROLES).
 
     dist in an oblique view runs from the person's ground point to the vehicle's ground line; in a top view
     it is the gap between the two outlines. Two kinds of frame are skipped: over OCCLUDED of the person's mask
     lies inside the vehicle's (that overlap is the camera angle, not proximity), or the vehicle shows under
     HIDDEN of its track's median mask area (partly hidden, so its visible bottom isn't its ground contact)."""
     rows = [
-        (t["id"], t["class"], fr["f"], *fr["bbox"], fr["contour"])
-        for t in tracks for fr in t["frames"]
+        (t["id"], role(t), fr["f"], *fr["bbox"], fr["contour"])
+        for t in tracks if role(t) for fr in t["frames"]
     ]
-    frames = pd.DataFrame(rows, columns=["id", "cls", "f", "x0", "y0", "x1", "y1", "contour"])
-    a = frames[frames.cls.isin(VULNERABLE)]
-    b = frames[frames.cls.isin(VEHICLES)]
+    frames = pd.DataFrame(rows, columns=["id", "role", "f", "x0", "y0", "x1", "y1", "contour"])
+    a = frames[frames.role == "vulnerable"]
+    b = frames[frames.role == "vehicle"]
     m = a.merge(b, on="f", suffixes=("_a", "_b"))
     gap_x = np.maximum(0, np.maximum(m.x0_a - m.x1_b, m.x0_b - m.x1_a))
     gap_y = np.maximum(0, np.maximum(m.y0_a - m.y1_b, m.y0_b - m.y1_a))
@@ -105,7 +115,7 @@ def pairs_from_tracks(tracks: list[dict], stats: pd.DataFrame, max_dist: float, 
         dist = shapely.distance(feet, np.array([ground_line(c) for c in m.contour_b], dtype=object))
     inside = shapely.area(shapely.intersection(poly_a, poly_b)) / np.maximum(shapely.area(poly_a), 1e-9)
     usual = {t["id"]: np.median([shapely.Polygon(fr["contour"]).area for fr in t["frames"]])
-             for t in tracks if t["class"] in VEHICLES}
+             for t in tracks if role(t) == "vehicle"}
     shown = shapely.area(poly_b) / np.maximum(m.id_b.map(usual).to_numpy(), 1e-9)
     out = pd.DataFrame({"a": m.id_a.to_numpy(), "b": m.id_b.to_numpy(), "f": m.f.to_numpy(), "dist": dist})
     out = out[(out.dist <= max_dist) & (inside <= OCCLUDED) & (shown >= HIDDEN)]

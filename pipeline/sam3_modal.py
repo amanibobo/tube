@@ -13,6 +13,7 @@ start_session(resource_path) -> add_prompt(frame_index, text) -> handle_stream_r
 yielding {frame_index, outputs: {out_obj_ids, out_probs, out_boxes_xywh, out_binary_masks}} -> close_session.
 """
 
+import os
 import subprocess
 import tempfile
 import time
@@ -23,12 +24,17 @@ import modal
 
 from pipeline.chunks import SAMPLE_FPS, Chunk, densify, plan_chunks, stitch, to_tracks
 
-APP = "tubewatch-sam3"
+# Deploy-time configuration (defaults are production). The values are baked into the image env as well, so the
+# container re-imports this module with the same settings it was deployed with. Example benchmark deploy:
+#   TUBE_SAM3_APP=tubewatch-sam3-l4 TUBE_SAM3_GPU=L4 TUBE_SAM3_CONTAINERS=8 TUBE_SAM3_SCALEDOWN=60 \
+#     modal deploy -m pipeline.sam3_modal
+APP = os.environ.get("TUBE_SAM3_APP", "tubewatch-sam3")
 # "vehicle" finds cars, buses and trucks in one pass; "car" alone misses buses and trucks.
 PROMPTS = ("vehicle", "person", "bicycle")
 SAM3_COMMIT = "0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc"
-GPU = "H100"
-MAX_CONTAINERS = 4
+GPU = os.environ.get("TUBE_SAM3_GPU", "L4")
+MAX_CONTAINERS = int(os.environ.get("TUBE_SAM3_CONTAINERS", "8"))
+SCALEDOWN_S = int(os.environ.get("TUBE_SAM3_SCALEDOWN", "60"))
 MIN_CHUNK_SEC = 6.0
 CHUNK_SIDE = 960
 
@@ -38,7 +44,8 @@ image = (
     .pip_install("torch==2.10.0", "torchvision", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install(f"git+https://github.com/facebookresearch/sam3.git@{SAM3_COMMIT}", "opencv-python-headless",
                  "einops", "pycocotools", "psutil", "scipy", "setuptools<81", "shapely")
-    .env({"HF_HOME": "/weights/hf", "HF_HUB_CACHE": "/weights/hf/hub"})
+    .env({"HF_HOME": "/weights/hf", "HF_HUB_CACHE": "/weights/hf/hub", "TUBE_SAM3_APP": APP, "TUBE_SAM3_GPU": GPU,
+          "TUBE_SAM3_CONTAINERS": str(MAX_CONTAINERS), "TUBE_SAM3_SCALEDOWN": str(SCALEDOWN_S)})
     .add_local_python_source("pipeline")
 )
 app = modal.App(APP, image=image)
@@ -46,7 +53,7 @@ weights = modal.Volume.from_name("tubewatch-sam3-weights", create_if_missing=Tru
 
 
 @app.cls(gpu=GPU, volumes={"/weights": weights}, secrets=[modal.Secret.from_name("huggingface")],
-         scaledown_window=300, min_containers=0, max_containers=MAX_CONTAINERS, timeout=30 * 60)
+         scaledown_window=SCALEDOWN_S, min_containers=0, max_containers=MAX_CONTAINERS, timeout=30 * 60)
 class Sam3:
     @modal.enter()
     def load(self):
@@ -125,10 +132,11 @@ def chunk_video(video: Path, chunk: Chunk) -> bytes:
         return out.read_bytes()
 
 
-def sam3_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None]) -> list[dict]:
-    """Raw tracks {source_class, frames} for the whole clip. Chunks run in parallel; results arrive in order,
-    and after each one the stitched tracks so far go to on_progress(tracks, frames_done)."""
-    chunks = plan_chunks(info["duration"], chunk_sec=max(MIN_CHUNK_SEC, info["duration"] / MAX_CONTAINERS))
+def sam3_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None],
+                parallel: int = MAX_CONTAINERS) -> list[dict]:
+    """Raw tracks {source_class, frames} for the whole clip, in `parallel` chunks run side by side. Results
+    arrive in order, and after each one the stitched tracks so far go to on_progress(tracks, frames_done)."""
+    chunks = plan_chunks(info["duration"], chunk_sec=max(MIN_CHUNK_SEC, info["duration"] / parallel))
     scale = info["width"] / CHUNK_SIDE
     step = round(info["fps"] / SAMPLE_FPS) + 1
     jobs = [{"index": c.index, "video": chunk_video(video, c), "prompts": list(PROMPTS)} for c in chunks]

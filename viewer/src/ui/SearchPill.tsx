@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useVoice, voiceActive, type Ending } from '../archive/voice'
+import { searchPlaceholder } from '../classes'
 import { useStore } from '../store'
 
 function SearchIcon() {
@@ -23,6 +24,7 @@ function MicIcon() {
 /** Search by typing or by voice. Voice uses the archive's realtime speech-to-text, so a spoken query runs like a typed one. */
 export function SearchPill() {
   const input = useStore((s) => s.input)
+  const placeholder = useStore((s) => searchPlaceholder(s.meta))
   const loading = useStore((s) => s.search.kind === 'loading')
   const { type, ask, clear } = useStore.getState()
   const field = useRef<HTMLInputElement>(null)
@@ -74,7 +76,7 @@ export function SearchPill() {
           ref={field}
           className={active ? 'hearing' : undefined}
           value={input}
-          placeholder="Search cars, people, or ask a question"
+          placeholder={placeholder}
           spellCheck={false}
           onChange={(e) => {
             voice.cancel()

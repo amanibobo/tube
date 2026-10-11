@@ -4,6 +4,7 @@ Each finished stage is recorded in meta["done"], and each stage writes its outpu
 interrupted at any point resumes at the first unfinished stage and redoes only that one.
 """
 
+import functools
 import gzip
 import json
 import os
@@ -90,8 +91,10 @@ def segmenting(root: Path, meta: dict, report: Reporter) -> None:
 
     info = {k: meta[k] for k in ("fps", "width", "height", "frames")} | {"duration": meta["duration_s"]}
     backend = os.environ.get("TUBEWATCH_BACKEND", "auto")
-    run: Callable = yolo_tracks
-    if backend in ("auto", "sam3"):
+    track = meta.get("track")
+    run: Callable = functools.partial(yolo_tracks, track=track)
+    meta["backend"] = "yolo"
+    if not track and backend in ("auto", "sam3"):  # SAM 3 isn't wired for named tracking yet
         from pipeline import sam3_modal
 
         ok, why = sam3_modal.available()
@@ -101,10 +104,9 @@ def segmenting(root: Path, meta: dict, report: Reporter) -> None:
             raise JobFailed(f"{why}.")
         else:
             report.stage("segmenting", f"{why}; using YOLO on this machine.")
-    meta.setdefault("backend", "yolo")
 
     def partial(raw: list[dict], frames_done: int) -> None:
-        tracks = build_tracks(raw, meta["fps"])
+        tracks = build_tracks(raw, meta["fps"], track)
         write_json(root / "tubes.json", {"video": {**video_block(root, meta), "partial": True,
                                                    "frames_done": frames_done}, "tracks": tracks})
         report.progress(frames_done / meta["frames"])
@@ -118,7 +120,10 @@ def segmenting(root: Path, meta: dict, report: Reporter) -> None:
 
 def building(root: Path, meta: dict, report: Reporter) -> None:
     raw = json.loads(gzip.decompress((root / "segments.json.gz").read_bytes()))["tracks"]
-    tracks = build_tracks(raw, meta["fps"])
+    tracks = build_tracks(raw, meta["fps"], meta.get("track"))
+    if not tracks:
+        names = ", ".join(t["name"] for t in meta.get("track") or []) or "cars, people or bikes"
+        raise JobFailed(f"Tube didn't find any {names} in this video. Try a clip where they're larger and in view.")
     write_dataset(root, {"video": video_block(root, meta), "tracks": tracks})
     if not (root / "zones.json").exists():
         write_json(root / "zones.json", [])

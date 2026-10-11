@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { megabytes, stageText } from '../videos'
 import { openFilePicker } from './Library'
+import { TrackStep } from './TrackStep'
 
 function Progress({ value }: { value: number }) {
   return (
@@ -19,6 +20,7 @@ export function JobStatus() {
 
   return (
     <>
+      {upload.kind === 'choosing' && <TrackStep upload={upload} />}
       {upload.kind === 'sending' && (
         <div className="job">
           <div className="job-line">

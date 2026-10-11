@@ -22,6 +22,7 @@ type Meta = {
   credit: string | null
   source: 'builtin' | 'upload'
   notice?: string
+  track?: TrackedName[]
 }
 type VideoBlock = { id: string; fps: number; width: number; height: number; frames: number; thumb_stride: number; thumb_width: number; credit?: string }
 type TrackFrame = { f: number; bbox: number[]; centroid: Px; contour: Px[] }
@@ -121,12 +122,13 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, path: string,
   createReadStream(path, { start, end }).pipe(res)
 }
 
-function multipartFile(raw: Buffer, contentType: string): { name: string; type: string; data: Buffer; title?: string } | null {
+function multipartFile(raw: Buffer, contentType: string): { name: string; type: string; data: Buffer; title?: string; track?: string } | null {
   const boundary = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType)
   if (!boundary) return null
   const delimiter = Buffer.from(`--${boundary[1] ?? boundary[2]}`)
   let file: { name: string; type: string; data: Buffer } | null = null
   let title: string | undefined
+  let track: string | undefined
   for (let at = raw.indexOf(delimiter); at !== -1; ) {
     const next = raw.indexOf(delimiter, at + delimiter.length)
     if (next === -1) break
@@ -142,9 +144,31 @@ function multipartFile(raw: Buffer, contentType: string): { name: string; type: 
         data: content,
       }
     } else if (name === 'title') title = content.toString()
+    else if (name === 'track') track = content.toString()
     at = next
   }
-  return file && { ...file, title }
+  return file && { ...file, title, track }
+}
+
+type TrackedName = { name: string; detector: string }
+
+/** A slice of COCO, enough to develop the upload step against; the server resolves the real list. */
+const TRACKABLE = {
+  default: ['car', 'person', 'bicycle'],
+  names: ['person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'sports ball', 'frisbee', 'kite'],
+  aliases: { player: 'person', people: 'person', ball: 'sports ball', bike: 'bicycle', cyclist: 'bicycle' } as Record<string, string>,
+}
+
+/** `dog, players` → [{name: dog, detector: dog}, {name: player, detector: person}]; any unknown name is an {error}. */
+function resolveTrack(text: string): TrackedName[] | { error: string } {
+  const out: TrackedName[] = []
+  for (const raw of text.toLowerCase().split(/,|\band\b/).map((n) => n.trim()).filter(Boolean)) {
+    const forms = [raw, raw.replace(/s$/, ''), raw.replace(/es$/, '')]
+    const name = forms.find((f) => TRACKABLE.names.includes(f) || f in TRACKABLE.aliases)
+    if (!name) return { error: `Tube can’t track “${raw}”. It can track names like dog, cat, horse, bird, player or ball.` }
+    out.push({ name, detector: TRACKABLE.aliases[name] ?? name })
+  }
+  return out
 }
 
 function emit(entry: Entry, event: object) {
@@ -188,8 +212,9 @@ function outline(cx: number, cy: number, rx: number, ry: number): Px[] {
   })
 }
 
-function fakeTrack(id: number, v: VideoBlock, from: number, to: number): Track {
-  const isCar = id % 3 !== 0
+/** `names`: what the upload asked to track; without it, the traffic default's cars and people. */
+function fakeTrack(id: number, v: VideoBlock, from: number, to: number, names: string[] | null): Track {
+  const isCar = names ? id % names.length !== 0 : id % 3 !== 0
   const parked = isCar && id % 4 === 1
   const s = v.width / 1920
   const start = from + Math.floor(rand() * Math.max(1, (to - from) * 0.5))
@@ -205,7 +230,7 @@ function fakeTrack(id: number, v: VideoBlock, from: number, to: number): Track {
     const [rx, ry] = isCar ? [110 * s, 55 * s] : [22 * s, 60 * s]
     frames.push({ f, bbox: [cx - rx, cy - ry, cx + rx, cy + ry], centroid: [Math.round(cx), Math.round(cy)], contour: outline(cx, cy, rx, ry) })
   }
-  return { id, class: isCar ? 'car' : 'person', first_frame: start, last_frame: end, frames }
+  return { id, class: names ? names[id % names.length]! : isCar ? 'car' : 'person', first_frame: start, last_frame: end, frames }
 }
 
 function computeNearMisses(entry: Entry): NearMiss[] {
@@ -290,7 +315,7 @@ async function runJob(entry: Entry, input: string, readable: boolean) {
     await wait(STEP_MS)
     const from = Math.floor((c / chunks) * video.frames)
     const to = Math.floor(((c + 1) / chunks) * video.frames)
-    for (let i = 0; i < per; i++) entry.tracks.push(fakeTrack(entry.tracks.length + 1, video, from, to))
+    for (let i = 0; i < per; i++) entry.tracks.push(fakeTrack(entry.tracks.length + 1, video, from, to, entry.meta.track?.map((t) => t.name) ?? null))
     entry.framesDone = to
     setStatus(entry, 'processing', 'segmenting', 0.15 + (0.6 * (c + 1)) / chunks)
     emit(entry, { type: 'tubes', frames_done: to, tracks: entry.tracks.length })
@@ -309,6 +334,8 @@ async function upload(req: IncomingMessage, res: ServerResponse) {
   if (!file) return send(res, 400, { error: 'The upload had no file in it.' })
   const looksLikeVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(file.name)
   if (!looksLikeVideo) return send(res, 400, { error: 'That file is not a video.' })
+  const track = file.track?.trim() ? resolveTrack(file.track) : null
+  if (track && 'error' in track) return send(res, 400, track)
   const id = `upload-${Date.now().toString(36)}-${nextUpload++}`
   const dir = join(UPLOADS, id)
   await mkdir(dir, { recursive: true })
@@ -328,6 +355,7 @@ async function upload(req: IncomingMessage, res: ServerResponse) {
     source: 'upload',
   }
   if (probed && probed.duration > MAX_SECONDS) meta.notice = 'Trimmed to the first 2 minutes.'
+  if (track) meta.track = track
   const entry: Entry = { meta, dir, video: null, tracks: [], framesDone: 0, cache: {}, nearMisses: null, listeners: new Set() }
   videos.set(id, entry)
   void runJob(entry, input, probed !== null).catch((err: Error) => {
@@ -354,6 +382,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://fixture')
   const method = req.method ?? 'GET'
   if (url.pathname === '/api/warm' && method === 'POST') return send(res, 200, { ok: true })
+  if (url.pathname === '/api/trackable') return send(res, 200, TRACKABLE)
   if (url.pathname === '/api/videos') {
     if (method === 'POST') return upload(req, res)
     const list = [...videos.values()].map((e) => e.meta).sort((a, b) => b.created.localeCompare(a.created))

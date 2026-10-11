@@ -1,5 +1,6 @@
-import type { Answer, NearMiss, Segment, Tubes } from './types'
+import { singulars } from './classes'
 import { HIGHLIGHT_RED } from './scene/space'
+import type { Answer, NearMiss, Segment, Tubes } from './types'
 
 export type Search =
   | { kind: 'idle' }
@@ -21,18 +22,15 @@ const ALIASES: Record<string, string[]> = {
   motorbike: ['motorcycle'],
 }
 
-const PROMPT_CLASSES = ['car', 'person', 'bicycle', 'truck', 'bus', 'motorcycle']
-
-const singular = (word: string) => word.replace(/(es|s)$/, '')
-
 export const isClassSearch = (text: string) => words(text).length <= 2
 
 function words(text: string): string[] {
   return text.toLowerCase().split(/[^a-z]+/).filter(Boolean)
 }
 
-export function matchClasses(text: string, tubes: Tubes): string[] {
-  const known = new Set([...PROMPT_CLASSES, ...tubes.tracks.flatMap((t) => [t.class, t.source_class ?? t.class])])
+/** Classes the words name, among the ones this video has or expects (`expected`: what it was asked to track). */
+export function matchClasses(text: string, tubes: Tubes, expected: readonly string[]): string[] {
+  const known = new Set([...expected, ...tubes.tracks.flatMap((t) => [t.class, t.source_class ?? t.class])])
   return parseClasses(text, known)
 }
 
@@ -44,16 +42,16 @@ export function matchingTracks(tubes: Tubes, classes: string[]): number[] {
 function parseClasses(text: string, known: Set<string>): string[] {
   const out = new Set<string>()
   for (const word of words(text)) {
-    for (const form of [word, singular(word), word.replace(/s$/, '')]) {
+    for (const form of singulars(word)) {
       for (const cls of ALIASES[form] ?? [form]) if (known.has(cls)) out.add(cls)
     }
   }
   return [...out]
 }
 
-export function deriveHighlight(search: Search, focus: NearMiss | null, tubes: Tubes): Highlight {
+export function deriveHighlight(search: Search, focus: NearMiss | null, tubes: Tubes, expected: readonly string[]): Highlight {
   if (search.kind === 'classes') {
-    const classes = matchClasses(search.text, tubes)
+    const classes = matchClasses(search.text, tubes, expected)
     if (classes.length > 0) return { matched: new Set(matchingTracks(tubes, classes)), segments: [] }
   }
   if (search.kind === 'answer') return fromSegments(search.answer.highlight.segments)

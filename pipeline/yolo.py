@@ -8,8 +8,9 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.contours import mask_contour
+from pipeline.trackable import COCO, COCO_ID
 
-COCO = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+TRAFFIC = ["person", "bicycle", "car", "motorcycle", "bus", "truck"]
 WEIGHTS = str(Path(__file__).resolve().parents[1] / "yolo11m-seg.pt")
 PROGRESS_EVERY = 150
 _ONE_AT_A_TIME = threading.Lock()  # concurrent MPS inference from two threads segfaults
@@ -23,23 +24,45 @@ def pick_device(model) -> str:
         return "cpu"
 
 
-def yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None]) -> list[dict]:
-    """Raw tracks {source_class, frames}; calls on_progress(tracks_so_far, frames_done) every PROGRESS_EVERY."""
+def yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None],
+                track: list[dict] | None = None) -> list[dict]:
+    """Raw tracks {source_class, label, frames}. With `track` ([{name, detector}]) only those detector classes
+    are found and each track's label is the user's name; without it, the traffic classes with no label.
+    Calls on_progress(tracks_so_far, frames_done) every PROGRESS_EVERY frames."""
     with _ONE_AT_A_TIME:
-        return _yolo_tracks(video, info, on_progress)
+        return _yolo_tracks(video, info, on_progress, track)
 
 
-def _yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None]) -> list[dict]:
+LOOKALIKE_ANIMALS = ("dog", "cat", "cow", "horse", "sheep", "bear")
+
+
+def _yolo_tracks(video: Path, info: dict, on_progress: Callable[[list[dict], int], None],
+                 track: list[dict] | None) -> list[dict]:
     from ultralytics import YOLO
 
+    labels = {}
+    for t in track or []:
+        labels.setdefault(t["detector"], t["name"])
+    # YOLO often misreads one four-legged animal as another (a dog as "cow"), which breaks its track. When an animal
+    # is asked for, accept the look-alikes too and give them the same label.
+    for detector, name in list(labels.items()):
+        if detector in LOOKALIKE_ANIMALS:
+            for other in LOOKALIKE_ANIMALS:
+                labels.setdefault(other, name)
+    wanted = list(labels) if track else TRAFFIC
     model = YOLO(WEIGHTS)
     stream = model.track(source=str(video), stream=True, persist=True, tracker="bytetrack.yaml",
-                         classes=list(COCO), device=pick_device(model), retina_masks=True, verbose=False)
+                         classes=[COCO_ID[c] for c in wanted], device=pick_device(model), retina_masks=True,
+                         verbose=False)
     frames: dict[int, list] = {}
     votes: dict[int, Counter] = {}
 
     def snapshot() -> list[dict]:
-        return [{"source_class": votes[t].most_common(1)[0][0], "frames": fr} for t, fr in frames.items()]
+        out = []
+        for t, fr in frames.items():
+            source = votes[t].most_common(1)[0][0]
+            out.append({"source_class": source, "label": labels.get(source), "frames": fr})
+        return out
 
     for f, r in enumerate(stream):
         if f and f % PROGRESS_EVERY == 0:

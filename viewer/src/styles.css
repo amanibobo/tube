@@ -587,3 +587,40 @@ a.link {
   background: rgba(5, 5, 5, 0.6);
   pointer-events: none;
 }
+
+.track-step .field {
+  width: 100%;
+  flex: none;
+  font-size: var(--text);
+}
+
+.track-label {
+  margin-top: var(--s1);
+}
+
+.track-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s2);
+}
+
+.chip {
+  padding: 1px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+
+.chip:hover,
+.chip:focus-visible {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+  outline: none;
+}
+
+.track-error {
+  color: var(--fg);
+}

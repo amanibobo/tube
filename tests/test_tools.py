@@ -17,10 +17,62 @@ def test_near_finds_exactly_the_scripted_close_passes(ds, expected):
         assert abs(h.f - nm["f"]) <= 15
 
 
-def test_near_accepts_either_class_order_and_rejects_unpaired_classes(ds, expected):
+def test_near_accepts_either_class_order_and_rejects_unknown_classes(ds, expected):
     assert [pair(h) for h in T.near(ds, "car", "person")] == expected["close_pairs"]
-    with pytest.raises(ValueError):
-        T.near(ds, "person", "person")
+    with pytest.raises(ValueError, match="no 'dog' tracks"):
+        T.near(ds, "dog", "person")
+
+
+def brute_closest(cls_a, cls_b):
+    """Independent check: every shared frame of every pair, outline gap by plain shapely calls."""
+    import json
+
+    import shapely
+
+    from tests.conftest import SYNTH
+
+    tracks = json.loads((SYNTH / "tubes.json").read_text())["tracks"]
+    a_tracks = [t for t in tracks if t["class"] == cls_a]
+    b_tracks = [t for t in tracks if t["class"] == cls_b]
+    best = (float("inf"), None)
+    for ta in a_tracks:
+        fa = {fr["f"]: fr["contour"] for fr in ta["frames"]}
+        for tb in b_tracks:
+            if ta["id"] == tb["id"] or (cls_a == cls_b and ta["id"] > tb["id"]):
+                continue
+            for fr in tb["frames"]:
+                if fr["f"] in fa:
+                    d = shapely.Polygon(fa[fr["f"]]).distance(shapely.Polygon(fr["contour"]))
+                    best = min(best, (d, (ta["id"], tb["id"])))
+    return best
+
+
+@pytest.mark.parametrize("cls_a,cls_b", [("person", "person"), ("bicycle", "person")])
+def test_near_on_any_two_classes_matches_brute_force(ds, cls_a, cls_b):
+    hits = T.near(ds, cls_a, cls_b, max_dist=200)
+    gap, ids = brute_closest(cls_a, cls_b)
+    assert hits and hits[0].min_dist == pytest.approx(gap, abs=0.01)
+    assert tuple(sorted(hits[0].track_ids)) == tuple(sorted(ids))
+    assert all(h.extra["a"] != h.extra["b"] for h in hits)
+    assert [h.min_dist for h in hits] == sorted(h.min_dist for h in hits)
+
+
+def test_filter_tracks_sort_by_distance(ds):
+    """Independent check: the raw path length of each person's positions picks the same track."""
+    import numpy as np
+
+    path = {tid: float(np.hypot(np.diff(g.cx), np.diff(g.cy)).sum())
+            for tid, g in ds.stats.groupby("track_id") if ds.classes[tid] == "person"}
+    ranked = T.filter_tracks(ds, cls="person", sort_by="distance")
+    assert ranked[0].track_ids == [max(path, key=path.get)]
+    assert ranked[0].score == pytest.approx(max(path.values()), rel=0.05)
+    assert [h.score for h in ranked] == sorted((h.score for h in ranked), reverse=True)
+
+
+def test_rank_near_misses_is_empty_without_people_and_vehicles(ds):
+    ds.classes = {tid: ("dog" if c == "person" else c) for tid, c in ds.classes.items()}
+    ds.roles = {tid: (None if ds.classes[tid] == "dog" else r) for tid, r in ds.roles.items()}
+    assert T.rank_near_misses(ds) == []
 
 
 def test_moving_only_drops_passes_beside_a_stopped_car(ds, expected):
@@ -56,7 +108,7 @@ def test_stopped_in_crosswalk_excludes_car_that_stopped_before_it(ds, expected):
 
 
 def test_filter_tracks_fastest_and_filters(ds, expected):
-    top = T.filter_tracks(ds, cls="car", sort_by_speed=True, top_k=1)
+    top = T.filter_tracks(ds, cls="car", sort_by="peak_speed", top_k=1)
     assert top[0].track_ids == [expected["fastest_car"]["car"]]
     assert top[0].score == pytest.approx(expected["fastest_car"]["speed"], rel=0.02)
     assert len(T.filter_tracks(ds, cls="bicycle")) == 1

@@ -178,12 +178,28 @@ await cdp.send('Network.enable')
 await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 400 * 1024 })
 const warmCalls = []
 page.on('request', (r) => r.url().endsWith('/api/warm') && warmCalls.push(Date.now()))
+// Chromium doesn't expose a multipart body holding a File, so this reads what the server took from it: meta.track.
+const uploads = []
+page.on('response', async (r) => {
+  if (r.request().method() !== 'POST' || !r.url().endsWith('/api/videos') || !r.ok()) return
+  const meta = await r.json().catch(() => null)
+  uploads.push({ track: meta?.track?.map((t) => t.name).join(', ') ?? null })
+})
 await page.setInputFiles('#upload-input', CLIP)
+await page.waitForSelector('.track-step', { timeout: 10000 })
+check(warmCalls.length >= 1, 'picking a file warms the GPU before anything is sent')
+{
+  const value = await page.inputValue('#track-field')
+  const chips = await page.locator('.track-chips .chip').allInnerTexts()
+  check(value === 'cars, people, bikes', `the track step starts on the traffic default (${value})`)
+  check(chips.includes('dog') && chips.length >= 4, `with suggestions from /api/trackable (${chips.join(', ')})`)
+}
+await shot(page, '16-track-step')
+await page.click('.track-step button[type=submit]')
 await waitFor(page, () => {
   const u = window.__tubewatch.store.getState().upload
   return u.kind === 'sending' && u.loaded > 0 && u.loaded < u.total
 })
-check(warmCalls.length >= 1, 'picking a file warms the GPU')
 await settle(page, 300)
 await shot(page, '12-uploading')
 await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
@@ -192,6 +208,7 @@ const uploaded = await waitFor(page, (prev) => {
   const s = window.__tubewatch.store.getState()
   return s.videoId !== prev && s.meta?.title ? s.videoId : false
 }, other).then((h) => h.jsonValue())
+check(uploads.length === 1 && uploads[0].track === null, 'the default sends no track, so the server keeps its traffic default')
 const stages = []
 await page.exposeFunction('__stage', (s) => stages.push(s))
 await page.evaluate(() => {
@@ -287,6 +304,7 @@ await settle(page, 900)
 await shot(page, '14-ready')
 
 await page.setInputFiles('#upload-input', BROKEN)
+await page.click('.track-step button[type=submit]')
 await waitFor(page, (id) => {
   const s = window.__tubewatch.store.getState()
   return s.videoId !== id && s.meta?.status === 'failed'
@@ -301,6 +319,7 @@ await shot(page, '15-error')
 
 if (LONG) {
   await page.setInputFiles('#upload-input', LONG)
+  await page.click('.track-step button[type=submit]')
   await waitFor(page, () => window.__tubewatch.store.getState().notice !== null, null, 60000)
   const notice = await store(page, () => window.__tubewatch.store.getState().notice.text)
   const longId = await store(page, () => window.__tubewatch.store.getState().videoId)
@@ -309,6 +328,48 @@ if (LONG) {
   await page.evaluate((id) => window.__tubewatch.store.getState().select(id), longId)
   await settle(page, 300)
   check(!(await page.locator('.rail').innerText()).includes(notice), 'the notice shows only once')
+}
+
+{
+  await page.evaluate((id) => window.__tubewatch.store.getState().select(id), uploaded)
+  await waitFor(page, (id) => window.__tubewatch.store.getState().videoId === id && window.__tubewatch.store.getState().tubes, uploaded)
+  await settle(page, 600)
+  const placeholder = await page.getAttribute('.pill input', 'placeholder')
+  const questions = await page.locator('.suggestions button').allInnerTexts()
+  check(placeholder === 'Search cars, people, or ask a question', `a traffic clip keeps its placeholder (${placeholder})`)
+  check(questions[0] === 'Every time a person and a car got close', `and its traffic questions (${questions[0]})`)
+}
+
+{
+  const sentBefore = uploads.length
+  await page.setInputFiles('#upload-input', CLIP)
+  await page.waitForSelector('.track-step', { timeout: 10000 })
+  await page.fill('#track-field', 'unicorn')
+  await page.click('.track-step button[type=submit]')
+  await page.waitForSelector('.track-error', { timeout: 5000 })
+  const message = await page.locator('.track-error').innerText()
+  check(/can’t track “unicorn”/.test(message) && uploads.length === sentBefore, `an unknown name is refused before uploading: ${message}`)
+  await shot(page, '17-track-unknown')
+  await page.fill('#track-field', 'dog')
+  await page.click('.track-step button[type=submit]')
+  await waitFor(page, () => window.__tubewatch.store.getState().upload.kind === 'idle' && window.__tubewatch.store.getState().meta?.track?.length > 0)
+  check(uploads.at(-1)?.track === 'dog', `the server received track=${uploads.at(-1)?.track}`)
+  await waitFor(page, () => window.__tubewatch.store.getState().meta?.status === 'ready', null, 90000)
+  await settle(page, 800)
+  const placeholder = await page.getAttribute('.pill input', 'placeholder')
+  check(placeholder === 'Search dogs, or ask a question', `the placeholder names this clip's class (${placeholder})`)
+  const questions = await page.locator('.suggestions button').allInnerTexts()
+  check(questions.length === 3 && questions.every((q) => /dog/.test(q)), `the suggestions ask about dogs (${questions.join(' / ')})`)
+  check((await page.locator('.panel h2').innerText()) === 'Try asking' && (await page.locator('.rows').count()) === 0, 'no closest calls for a clip without people and vehicles')
+  await page.fill('.pill input', 'dogs')
+  await settle(page, 900)
+  const lit = await page.evaluate(() => {
+    const t = window.__tubewatch.store.getState().tubes
+    const byId = new Map(t.tracks.map((x) => [x.id, x.class]))
+    return { visible: window.__tubewatch.visibleTracks().map((id) => byId.get(id)), dogs: t.tracks.filter((x) => x.class === 'dog').length }
+  })
+  check(lit.visible.length === lit.dogs && lit.visible.every((c) => c === 'dog'), `"dogs" lights the ${lit.dogs} dog tubes only`)
+  await shot(page, '18-dogs')
 }
 
 check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)

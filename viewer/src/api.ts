@@ -1,4 +1,4 @@
-import type { JobEvent, NearMiss, QueryResponse, Tubes, VideoId, VideoMeta } from './types'
+import type { JobEvent, NearMiss, QueryResponse, Trackable, Tubes, VideoId, VideoMeta } from './types'
 
 export type PartialTubes = { tubes: Tubes; framesDone: number | null }
 
@@ -42,6 +42,7 @@ const staticApi = {
   video: (id: VideoId) => fetch(demo(id, '/meta.json')).then((r) => json<VideoMeta>(r)),
   warm: () => {},
   upload: async (): Promise<UploadResult> => ({ ok: false, message: 'Uploads need Tube running locally.' }),
+  trackable: async (): Promise<Trackable> => ({ default: ['car', 'person', 'bicycle'], names: [], aliases: {} }),
   events: () => () => {},
   async tubes(id: VideoId): Promise<PartialTubes | null> {
     const tubes = await fetch(demo(id, '/tubes.json')).then((r) => json<Tubes>(r))
@@ -73,7 +74,10 @@ const serverApi = {
     void fetch('/api/warm', { method: 'POST' }).catch(() => {})
   },
 
-  upload(file: File, title: string, onProgress: (loaded: number, total: number) => void): Promise<UploadResult> {
+  trackable: () => fetch('/api/trackable').then((r) => json<Trackable>(r)),
+
+  /** `track`: comma-separated names to track; null keeps the traffic default. */
+  upload(file: File, title: string, track: string | null, onProgress: (loaded: number, total: number) => void): Promise<UploadResult> {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest()
       xhr.open('POST', '/api/videos')
@@ -92,6 +96,7 @@ const serverApi = {
       const form = new FormData()
       form.append('file', file)
       form.append('title', title)
+      if (track) form.append('track', track)
       xhr.send(form)
     })
   },

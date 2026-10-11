@@ -36,7 +36,7 @@ data/<video_id>/
 | Method | Path | Returns |
 | --- | --- | --- |
 | GET | `/api/videos` | `[meta]`, newest first |
-| POST | `/api/videos` | multipart `file` (+ optional `title`). Returns `meta` with status `queued`. Rejects anything that isn't a video with HTTP 400 and `{error}`. Clips over 120 s are trimmed, and `meta.notice` says so. |
+| POST | `/api/videos` | multipart `file` (+ optional `title`, optional `track`: comma-separated things to track, see "What to track"). Returns `meta` with status `queued`. Rejects anything that isn't a video with HTTP 400 and `{error}`. Clips over 120 s are trimmed, and `meta.notice` says so. |
 | POST | `/api/videos/clip` | JSON `{url, start_s, end_s, title}`. Cuts `[start_s, end_s]` (at most 120 s) out of an http(s) video URL, following redirects, then runs the same job as an upload. Returns `meta` with status `queued` and `source: "clip"`. It is idempotent: the same url, start and end return the existing video, whatever its status. A bad range or an unreadable source gets HTTP 400 with `{error}` |
 | GET | `/api/videos/{id}` | `meta` |
 | DELETE | `/api/videos/{id}` | `{ok: true}`; uploaded videos only, built-in datasets get 403 |
@@ -46,7 +46,8 @@ data/<video_id>/
 | GET | `/api/videos/{id}/frames/{f}.jpg` | the thumbnail nearest to frame `f` (available once normalizing is done) |
 | GET | `/api/videos/{id}/near-misses?top_k=10` | `{list: [{label, f, score, a, b, min_dist}]}`, highest score first (ready only) |
 | POST | `/api/videos/{id}/query` | body `{text}`; returns a query response (ready only; otherwise `{error}`) |
-| POST | `/api/warm` | `{ok: true}`. Wakes the GPU container. The viewer calls it on load and when a file is picked |
+| GET | `/api/trackable` | `{default: ["car", "person", "bicycle"], names: [...], aliases: {"player": "person", ...}}`: what the local detector can track, for the upload box's suggestions and validation |
+| POST | `/api/warm` | `{ok: true}`. Wakes the GPU container. The viewer calls it only when a file is picked (not on page load), so browsing never starts a GPU |
 
 ## Events
 
@@ -86,3 +87,11 @@ This applies when `video.params.view` is `"oblique"`. The synthetic dataset is a
 ## Clips from the archive
 
 The archive (`/archive`) sends a moment to the cube with `POST /api/videos/clip`. The window is 20 s either side of the moment, clamped to `[0, duration]`, using the archive film's playable video URL (`/api/video/{id}` on the archive API, resolved to an absolute URL, which 302s to R2). The title reads `"<film title> · m:ss–m:ss"`. The viewer then opens `/app?v=<id>` and shows the job's progress as for an upload. The static (`VITE_STATIC=1`) build has no Tube server, so the archive disables the button there and explains why.
+
+## What to track
+
+An upload can name what to track: `track=dog` or `track=dog, person`. Each name is resolved to a detector class (aliases such as `player`, `dogs`, `ball` map to `person`, `dog`, `sports ball`), and the track is labeled with the name the user typed, singular (`player`, not `person`). An unknown name gets HTTP 400 with `{error}` listing a few names it can track. Without `track`, Tube tracks the traffic default (cars, buses and trucks as `car`, people, bicycles), exactly as before.
+
+`meta.track` holds the resolved list, for example `[{"name": "player", "detector": "person"}]`. Track `class` values in `tubes.json` are those names, so classes are free-form strings, not a fixed set. The tools, the agent and the viewer's class search all work with whatever classes a video has.
+
+The local detector (YOLO11, COCO classes) is what resolves names today. SAM 3 takes free-text prompts, so it could track any name, but it isn't wired for custom names yet.

@@ -1,14 +1,8 @@
+import { hasPeopleAndVehicles, isTraffic, plural, suggestedQuestions, videoClasses } from '../classes'
 import { matchClasses, matchingTracks, type Search } from '../search'
 import { useStore } from '../store'
 import { clock } from '../time'
 import type { ListItem, NearMiss, Tubes } from '../types'
-
-const SUGGESTIONS = [
-  'Every time a person and a car got close',
-  'Top 3 most dangerous moments',
-  'Which cars stopped in the crosswalk',
-  'Fastest car in the clip',
-]
 
 type Row = { main: string; detail: string; f: number }
 
@@ -40,10 +34,11 @@ function Rows({ rows, fps, active, onPick }: { rows: Row[]; fps: number; active:
 }
 
 function Suggestions({ disabled = false }: { disabled?: boolean }) {
+  const meta = useStore((s) => s.meta)
   const { ask } = useStore.getState()
   return (
     <ul className="suggestions">
-      {SUGGESTIONS.map((q) => (
+      {suggestedQuestions(meta).map((q) => (
         <li key={q}>
           <button className="link muted" disabled={disabled} onClick={() => void ask(q)}>
             {q}
@@ -54,8 +49,8 @@ function Suggestions({ disabled = false }: { disabled?: boolean }) {
   )
 }
 
-function classTitle(tubes: Tubes, text: string, ready: boolean) {
-  const classes = matchClasses(text, tubes)
+function classTitle(tubes: Tubes, text: string, ready: boolean, expected: readonly string[]) {
+  const classes = matchClasses(text, tubes, expected)
   if (classes.length === 0) return `No class matches “${text.trim()}”`
   const n = matchingTracks(tubes, classes).length
   if (!ready) return n === 1 ? '1 track so far' : `${n} tracks so far`
@@ -67,10 +62,13 @@ function useContent(search: Search, tubes: Tubes): { title: string; body: React.
   const focus = useStore((s) => s.focus)
   const frame = useStore((s) => s.frame)
   const ready = useStore((s) => s.meta?.status === 'ready')
+  const meta = useStore((s) => s.meta)
   const { focusNearMiss, jumpTo } = useStore.getState()
   const fps = tubes.video.fps
+  const expected = videoClasses(meta)
+  const traffic = isTraffic(meta)
 
-  const closest = nearMisses.length > 0 && (
+  const closest = nearMisses.length > 0 && hasPeopleAndVehicles(tubes) && (
     <Rows rows={nearMisses.map(fromNearMiss)} fps={fps} active={focus?.f ?? null} onPick={(i) => focusNearMiss(nearMisses[i]!)} />
   )
   const browse = (
@@ -100,7 +98,7 @@ function useContent(search: Search, tubes: Tubes): { title: string; body: React.
     }
     case 'classes':
       return {
-        title: classTitle(tubes, search.text, ready),
+        title: classTitle(tubes, search.text, ready, expected),
         body: (
           <>
             <p className="muted small section">Try asking</p>
@@ -114,13 +112,17 @@ function useContent(search: Search, tubes: Tubes): { title: string; body: React.
           title: 'Try asking',
           body: (
             <>
-              <p className="muted small note">Questions and closest calls open once the video is ready. Search for cars or people now.</p>
+              <p className="muted small note">
+                {traffic
+                  ? 'Questions and closest calls open once the video is ready. Search for cars or people now.'
+                  : `Questions open once the video is ready. Search for ${expected.map(plural).join(' or ')} now.`}
+              </p>
               <Suggestions disabled />
             </>
           ),
         }
       }
-      return { title: nearMisses.length > 0 ? 'Closest calls' : 'Try asking', body: closest ? browse : <Suggestions /> }
+      return { title: closest ? 'Closest calls' : 'Try asking', body: closest ? browse : <Suggestions /> }
   }
 }
 

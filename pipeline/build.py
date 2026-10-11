@@ -10,6 +10,8 @@ from pipeline.chunks import inside
 CLASS_MAP = {"person": "person", "bicycle": "bicycle", "motorcycle": "bicycle", "car": "car", "bus": "car",
              "truck": "car", "vehicle": "car"}
 MIN_TRACK_SEC = 1.0
+# named tracking (animals, players) keeps shorter tracks: YOLO loses unusual subjects more often than traffic
+MIN_NAMED_TRACK_SEC = 0.5
 SPECIFICITY = {"person": 0, "bicycle": 1, "motorcycle": 1}  # lower wins; every vehicle class ranks after
 SAME_OBJECT = 0.5
 STATIC_PX = 4
@@ -43,13 +45,22 @@ def drop_duplicates(raw: list[dict]) -> list[dict]:
     return [t for k, t in enumerate(raw) if k not in dropped]
 
 
-def build_tracks(raw: list[dict], fps: float) -> list[dict]:
-    """Drop cross-prompt duplicates, tracks under MIN_TRACK_SEC, and person/bicycle tracks whose centroid
-    never moves STATIC_PX: on the Astoria clip those were bags and signs (range <= 1 px), while real
-    pedestrians ranged 16 px and up."""
-    kept = [t for t in drop_duplicates(raw) if len(t["frames"]) >= MIN_TRACK_SEC * fps
-            and not (CLASS_MAP[t["source_class"]] != "car" and is_static(t["frames"]))]
-    kept.sort(key=lambda t: t["frames"][0]["f"])
-    return [{"id": i, "class": CLASS_MAP[t["source_class"]], "source_class": t["source_class"],
-             "first_frame": t["frames"][0]["f"], "last_frame": t["frames"][-1]["f"], "frames": t["frames"]}
-            for i, t in enumerate(kept, 1)]
+def build_tracks(raw: list[dict], fps: float, track: list[dict] | None = None) -> list[dict]:
+    """Tubes tracks from raw detector tracks, numbered by first frame.
+
+    Traffic default (track is None): classes map through CLASS_MAP, and the traffic-calibrated filters apply:
+    cross-prompt duplicates, and person/bicycle tracks whose centroid never moves STATIC_PX (on the Astoria clip
+    those were bags and signs, range <= 1 px, while real pedestrians ranged 16 px and up).
+    Named tracking: the class is the user's name, and only the generic under-MIN_TRACK_SEC filter applies, so a
+    dog lying still or a goalkeeper standing isn't dropped. Both paths drop tracks under MIN_TRACK_SEC."""
+    if track is None:
+        kept = [t for t in drop_duplicates(raw)
+                if not (CLASS_MAP[t["source_class"]] != "car" and is_static(t["frames"]))]
+        label = lambda t: CLASS_MAP[t["source_class"]]  # noqa: E731
+    else:
+        kept = list(raw)
+        label = lambda t: t.get("label") or t["source_class"]  # noqa: E731
+    min_sec = MIN_TRACK_SEC if track is None else MIN_NAMED_TRACK_SEC
+    kept = sorted((t for t in kept if len(t["frames"]) >= min_sec * fps), key=lambda t: t["frames"][0]["f"])
+    return [{"id": i, "class": label(t), "source_class": t["source_class"], "first_frame": t["frames"][0]["f"],
+             "last_frame": t["frames"][-1]["f"], "frames": t["frames"]} for i, t in enumerate(kept, 1)]

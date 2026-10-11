@@ -18,7 +18,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from pipeline import media, process
+from pipeline import media, process, trackable
 from server.jobs import EventHub, Jobs
 from server.library import Library, Video
 from server.tools import rank_near_misses
@@ -98,10 +98,15 @@ def create_app(data_root: Path) -> FastAPI:
         return library.listing()
 
     @app.post("/api/videos")
-    def upload(file: Annotated[UploadFile, File()], title: Annotated[str, Form()] = ""):
+    def upload(file: Annotated[UploadFile, File()], title: Annotated[str, Form()] = "",
+               track: Annotated[str, Form()] = ""):
         suffix = Path(file.filename or "").suffix.lower()
         if not (file.content_type or "").startswith("video/") and suffix not in VIDEO_SUFFIXES:
             return error(400, "That file isn't a video.")
+        try:
+            names = trackable.resolve(track) if track.strip() else None
+        except ValueError as e:
+            return error(400, str(e))
         video = library.create_upload(file.filename or "upload.mp4", title)
         dest = Path(video.meta["source_file"])
         tmp = dest.with_suffix(dest.suffix + ".part")
@@ -112,7 +117,7 @@ def create_app(data_root: Path) -> FastAPI:
         if info is None:
             library.remove(video.id)
             return error(400, "That file isn't a video this app can read.")
-        fields = {"duration_s": round(min(info["duration"], media.MAX_SECONDS), 2)}
+        fields = {"duration_s": round(min(info["duration"], media.MAX_SECONDS), 2), "track": names}
         if info["duration"] > media.MAX_SECONDS:
             m, s = divmod(round(info["duration"]), 60)
             fields["notice"] = f"This clip is {m}:{s:02d} long, so only the first 2 minutes are used."
@@ -222,6 +227,10 @@ def create_app(data_root: Path) -> FastAPI:
         if not video.ready:
             return {"error": "This video is still processing. Ask again when it's ready."}
         return video.agent().answer(body.text)
+
+    @app.get("/api/trackable")
+    def trackable_names():
+        return trackable.trackable()
 
     @app.post("/api/warm")
     def warm():

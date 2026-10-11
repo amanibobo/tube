@@ -41,7 +41,15 @@ export type VideoMeta = {
   error: string | null
   duration_s: number | null
   notice?: string | null
+  /** What the upload asked to track, as resolved by the server; absent for the traffic default. */
+  track?: TrackedName[] | null
 }
+
+/** A name the user typed (`player`) and the detector class it resolved to (`person`). */
+export type TrackedName = { name: string; detector: string }
+
+/** `GET /api/trackable`: what the local detector can track. */
+export type Trackable = { default: string[]; names: string[]; aliases: Record<string, string> }
 
 export type JobEvent =
   | { type: 'status'; status: VideoMeta['status']; stage: Stage | null; progress: number }
