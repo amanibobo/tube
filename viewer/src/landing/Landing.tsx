@@ -14,8 +14,7 @@ const PAPER: { back: string; grain: [string, string, string]; ink: [number, numb
 
 const APP_URL = '/app'
 const PORTFOLIO_URL = 'https://amanibobo.dev'
-/** Placeholder until the Devpost submission is live; swap in the real project URL. */
-const DEVPOST_URL = 'https://devpost.com/software/tube'
+const DEVPOST_URL = 'https://devpost.com/software/distill-ho80lc'
 const DEEPWIKI_URL = 'https://deepwiki.com/amanibobo/tube'
 const HACKLANTA_URL = 'https://hacklanta.dev'
 const GITHUB_URL = 'https://github.com/amanibobo/tube'
