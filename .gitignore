@@ -15,3 +15,6 @@ data/*
 # test artifacts and third-party reference screenshots
 viewer/screenshots/
 docs/reference/
+
+# the hosted demo snapshot (scripts/export-static.mjs); real clip data stays out of git
+viewer/public/demo/

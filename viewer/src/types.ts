@@ -8,7 +8,6 @@ export type Video = {
   frames: number
   thumb_stride: number
   thumb_width: number
-  credit?: string
 }
 
 export type TrackFrame = {

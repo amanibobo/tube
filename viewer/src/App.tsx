@@ -1,7 +1,11 @@
 import { useEffect } from 'react'
+import './base.css'
+import './perf'
+import './styles.css'
 import { applyLayoutVars } from './layout'
 import { Cube } from './scene/Cube'
 import { useStore } from './store'
+import { STATIC } from './api'
 import { DropTarget } from './ui/DropTarget'
 import { FpsReadout } from './ui/FpsReadout'
 import { JobStatus } from './ui/JobStatus'
@@ -43,10 +47,9 @@ export function App() {
         {scene && <SearchPill />}
         <footer className="footer muted small">
           {debug && <FpsReadout />}
-          {scene?.tubes.video.credit && <span>{scene.tubes.video.credit}</span>}
         </footer>
       </div>
-      <DropTarget />
+      {!STATIC && <DropTarget />}
     </>
   )
 }

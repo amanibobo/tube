@@ -19,10 +19,59 @@ const scoped = (id: VideoId, path = '') => `/api/videos/${encodeURIComponent(id)
 
 type WireVideo = Tubes['video'] & { partial?: boolean; frames_done?: number }
 
-export const api = {
+/**
+ * The hosted demo has no server: `VITE_STATIC=1` builds read a snapshot under /demo
+ * (written by scripts/export-static.mjs) and answer only the questions it saved.
+ */
+export const STATIC = import.meta.env.VITE_STATIC === '1'
+const demo = (id: VideoId, path = '') => `/demo/${encodeURIComponent(id)}${path}`
+const thumbs = new Map<VideoId, { stride: number; last: number }>()
+let answers: Promise<Record<string, Record<string, QueryResponse>>> | null = null
+
+/** The server's cache key: lowercase words, punctuation dropped. */
+const normalize = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ')
+
+const staticApi = {
+  videos: () => fetch('/demo/videos.json').then((r) => json<VideoMeta[]>(r)),
+  video: (id: VideoId) => fetch(demo(id, '/meta.json')).then((r) => json<VideoMeta>(r)),
+  warm: () => {},
+  upload: async (): Promise<UploadResult> => ({ ok: false, message: 'Uploads need Tube running locally.' }),
+  events: () => () => {},
+  async tubes(id: VideoId): Promise<PartialTubes | null> {
+    const tubes = await fetch(demo(id, '/tubes.json')).then((r) => json<Tubes>(r))
+    const { thumb_stride: stride, frames } = tubes.video
+    thumbs.set(id, { stride, last: Math.floor((frames - 1) / stride) * stride })
+    return { tubes, framesDone: null }
+  },
+  nearMisses: (id: VideoId, topK: number) =>
+    fetch(demo(id, '/near-misses.json'))
+      .then((r) => json<{ list: NearMiss[] }>(r))
+      .then((d) => d.list.slice(0, topK)),
+  async query(id: VideoId, text: string): Promise<QueryResponse> {
+    answers ??= fetch('/demo/answers.json').then((r) => json(r))
+    const saved = (await answers)[id]?.[normalize(text)]
+    return saved ?? { error: 'This demo answers the suggested questions. Run Tube locally to ask anything.' }
+  },
+  frameUrl(id: VideoId, f: number) {
+    const t = thumbs.get(id) ?? { stride: 1, last: 0 }
+    const nearest = Math.min(t.last, Math.max(0, Math.round(f / t.stride) * t.stride))
+    return demo(id, `/frames/${String(nearest).padStart(6, '0')}.jpg`)
+  },
+  videoUrl: (id: VideoId) => demo(id, '/video.mp4'),
+}
+
+const serverApi = {
   videos: () => fetch('/api/videos').then((r) => json<VideoMeta[]>(r)),
   video: (id: VideoId) => fetch(scoped(id)).then((r) => json<VideoMeta>(r)),
-  warm: () => void fetch('/api/warm', { method: 'POST' }).catch(() => {}),
+  warm: (): void => {
+    void fetch('/api/warm', { method: 'POST' }).catch(() => {})
+  },
 
   upload(file: File, title: string, onProgress: (loaded: number, total: number) => void): Promise<UploadResult> {
     return new Promise((resolve) => {
@@ -79,3 +128,5 @@ export const api = {
   frameUrl: (id: VideoId, f: number) => scoped(id, `/frames/${f}.jpg`),
   videoUrl: (id: VideoId) => scoped(id, '/video.mp4'),
 }
+
+export const api: typeof serverApi = STATIC ? staticApi : serverApi

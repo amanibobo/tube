@@ -88,12 +88,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 0;
+  min-height: 0;
+  padding: 0 0 clamp(24px, 8vh, 120px);
 }
 
 .lp-cube {
   display: block;
-  width: min(1100px, 82vw);
+  /* the cube canvas is 1200x560; leave room for the title and the footer so the page never scrolls */
+  width: min(1100px, 82vw, calc((100dvh - 470px) * 2.1));
   outline: none;
 }
 
@@ -106,6 +108,34 @@
   display: block;
   width: 100%;
   height: auto;
+}
+
+.lp-about {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.lp-built {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--lp-muted);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.lp-built:hover,
+.lp-built:focus-visible {
+  color: var(--lp-fg);
+}
+
+.lp-built img {
+  display: block;
+  height: 28px;
+  width: auto;
 }
 
 .lp-blurb {
@@ -132,10 +162,85 @@
   color: var(--lp-fg);
 }
 
-.lp-devpost {
+.lp-iconlink {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.lp-deepwiki {
+  display: block;
+  border-radius: 3px;
+  opacity: 0.7;
+  transition: opacity 160ms ease;
+}
+
+.lp-iconlink:hover .lp-deepwiki,
+.lp-iconlink:focus-visible .lp-deepwiki {
+  opacity: 1;
+}
+
+.lp[data-theme='dark'] .lp-deepwiki {
+  filter: invert(1);
+}
+
+.lp-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lp-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--lp-bg);
+  color: var(--lp-fg);
+  font: 13px / 1.45 'Geist', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.lp-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.lp-player {
+  aspect-ratio: 16 / 9;
+  background: #050505;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+}
+
+.lp-player video,
+.lp-player img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lp-dialog-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 16px;
+}
+
+.lp-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--lp-muted);
+  border-radius: 6px;
+  background: none;
+  color: var(--lp-fg);
+  cursor: pointer;
 }
 
 .lp-primary {

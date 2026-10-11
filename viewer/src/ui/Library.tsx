@@ -1,3 +1,4 @@
+import { STATIC } from '../api'
 import { useStore } from '../store'
 import type { VideoMeta } from '../types'
 import { duration, stageText } from '../videos'
@@ -32,20 +33,39 @@ export function Library() {
           <span className="ellipsis">{title ?? 'Videos'}</span>
           <Chevron open={open} />
         </button>
-        <button className="link muted small" onClick={openFilePicker}>
-          Upload video
-        </button>
-        <input
-          id="upload-input"
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            e.target.value = ''
-            if (file) void pickFile(file)
-          }}
-        />
+      </div>
+      <div className="library-links">
+        {STATIC ? (
+          <a
+            className="link muted small"
+            href="https://github.com/amanibobo/tube#run-it"
+            target="_blank"
+            rel="noreferrer"
+            title="Uploads need Tube running locally"
+          >
+            Run locally
+          </a>
+        ) : (
+          <>
+            <button className="link muted small" onClick={openFilePicker}>
+              Upload video
+            </button>
+            <input
+              id="upload-input"
+              type="file"
+              accept="video/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) void pickFile(file)
+              }}
+            />
+          </>
+        )}
+        <a className="link muted small" href={videoId ? `/archive?v=${encodeURIComponent(videoId)}` : '/archive'}>
+          Archive search
+        </a>
       </div>
       {open && (
         <ul className="library-list fade-in">

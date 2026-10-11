@@ -1,6 +1,7 @@
 import { GrainGradient } from '@paper-design/shaders-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DitherCube, type Palette } from './DitherCube'
+import '../base.css'
 import './landing.css'
 
 type Theme = 'light' | 'dark'
@@ -28,6 +29,49 @@ const APP_URL = '/app'
 const PORTFOLIO_URL = 'https://amanibobo.dev'
 /** Placeholder until the Devpost submission is live; swap in the real project URL. */
 const DEVPOST_URL = 'https://devpost.com/software/tube'
+const DEEPWIKI_URL = 'https://deepwiki.com/amanibobo/tube'
+const HACKLANTA_URL = 'https://hacklanta.dev'
+/** Set to the demo recording's URL once it exists; until then the dialog shows a still of the app. */
+const DEMO_SRC: string | null = null
+const DEMO_POSTER = '/demo-poster.jpg'
+
+/** The demo in a dialog over the page. Until DEMO_SRC is set it shows a still of the app. */
+function DemoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (open && !el.open) el.showModal()
+    if (!open && el.open) el.close()
+  }, [open])
+
+  return (
+    <dialog
+      ref={ref}
+      className="lp-dialog"
+      onClose={onClose}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      aria-label="Demo video"
+    >
+      <div className="lp-player">
+        {open && DEMO_SRC ? (
+          <video src={DEMO_SRC} poster={DEMO_POSTER} controls autoPlay playsInline />
+        ) : (
+          <img src={DEMO_POSTER} alt="Tube showing a junction clip with every car's tube lit" />
+        )}
+      </div>
+      <div className="lp-dialog-bar">
+        <span className="lp-muted">{DEMO_SRC ? 'Tube demo' : 'Demo video coming soon'}</span>
+        <button type="button" className="lp-close" onClick={onClose} aria-label="Close">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    </dialog>
+  )
+}
 
 /** The Devpost mark, drawn small and monochrome: a hexagon around a D. */
 function DevpostMark() {
@@ -53,6 +97,7 @@ function storedTheme(): Theme {
 /** The landing: four corners of small type and one dashed space-time cube. Clicking the cube opens the app. */
 export function Landing() {
   const [theme, setTheme] = useState<Theme>(storedTheme)
+  const [demo, setDemo] = useState(false)
   const next: Theme = theme === 'dark' ? 'light' : 'dark'
   const colors = PAPER[theme]
 
@@ -95,11 +140,17 @@ export function Landing() {
       </section>
 
       <footer className="lp-corners">
-        <p className="lp-blurb">
-          Cities have thousands of traffic cameras, and almost nobody watches them. Tube stacks a clip into a cube
-          where every car and person becomes a tube through time, so “every time a person and a car got close” turns
-          into geometry. Near misses show up before a crash report does.
-        </p>
+        <div className="lp-about">
+          <a href={HACKLANTA_URL} className="lp-built" target="_blank" rel="noreferrer">
+            <span>Built for</span>
+            <img src="/hacklanta.png" width={36} height={28} alt="Hacklanta '26" />
+          </a>
+          <p className="lp-blurb">
+            Cities have thousands of traffic cameras, and almost nobody watches them. Tube stacks a clip into a cube
+            where every car and person becomes a tube through time, so “every time a person and a car got close” turns
+            into geometry. Near misses show up before a crash report does.
+          </p>
+        </div>
         <nav className="lp-links" aria-label="Links">
           <button
             type="button"
@@ -108,18 +159,29 @@ export function Landing() {
             aria-label={`Switch to ${next} mode`}
             title={`Switch to ${next} mode`}
           />
-          <a href={DEVPOST_URL} className="lp-link lp-devpost" target="_blank" rel="noreferrer">
+          <a href={DEVPOST_URL} className="lp-link lp-iconlink" target="_blank" rel="noreferrer">
             <DevpostMark />
             Devpost
+          </a>
+          <a href={DEEPWIKI_URL} className="lp-link lp-iconlink" target="_blank" rel="noreferrer">
+            <img className="lp-deepwiki" src="https://deepwiki.com/favicon.ico" width={14} height={14} alt="" />
+            DeepWiki
           </a>
           <a href={PORTFOLIO_URL} className="lp-link" target="_blank" rel="noreferrer">
             Portfolio
           </a>
+          <button type="button" className="lp-link lp-iconlink lp-button" onClick={() => setDemo(true)}>
+            <svg width="9" height="11" viewBox="0 0 10 12" aria-hidden>
+              <path d="M1.5 1.2v9.6c0 .4.4.6.7.4l7.4-4.8c.3-.2.3-.6 0-.8L2.2.8c-.3-.2-.7 0-.7.4z" fill="currentColor" />
+            </svg>
+            Demo video
+          </button>
           <a href={APP_URL} className="lp-link lp-primary">
             Open the app <span aria-hidden>→</span>
           </a>
         </nav>
       </footer>
+      <DemoDialog open={demo} onClose={() => setDemo(false)} />
     </main>
   )
 }

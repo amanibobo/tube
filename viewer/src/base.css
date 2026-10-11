@@ -1,0 +1,56 @@
+:root {
+  --fg: rgba(255, 255, 255, 0.88);
+  --fg-muted: rgba(255, 255, 255, 0.52);
+  --text: 14px;
+  --text-small: 12px;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s6: 24px;
+  --radius: 6px;
+  --radius-card: 8px;
+  --bg: #050505;
+  --surface: rgba(5, 5, 5, 0.72);
+  --line: rgba(255, 255, 255, 0.14);
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.09);
+  --free-left: calc(var(--rail-width) + var(--s4) * 2);
+  --free-right: var(--s4);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--text) / 1.45 -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+p,
+h2,
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}

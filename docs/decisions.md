@@ -17,3 +17,4 @@ Oct 10, 2026. These override the PRD where they conflict.
 Reference images: `reference/idle-volume.png` (idle state), `reference/search-car.png` and `reference/contour-cube.png` (search state), `reference/archive-strips.png` (P2 archive view, look only).
 
 11. **Name.** The product is called **Tube** (Oct 11), not Tubewatch. Internal identifiers keep the old name: the repo folder, the Modal app `tubewatch-sam3` and its Volume, env vars and storage keys.
+12. **Archive search.** vidsearch's Traffic Archive (semantic search over traffic clips drawn as filmstrips) is part of Tube at `/archive`, next to the cube at `/app` and the landing page at `/`. It keeps its own look and behavior and talks straight to vidsearch's Modal deployment (`VITE_ARCHIVE_API`), so it also works in the static demo. Each route lazy-loads only its own stylesheet; moving between the cube and the archive is a full page load.
